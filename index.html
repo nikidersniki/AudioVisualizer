@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="">
+  <head>
+    <meta charset="utf-8">
+    <title>Audio Visualizer</title>
+    <script type="importmap">
+    {
+      "imports": {
+        "three": "./modules/three.js/build/three.module.js"
+      }
+    }
+    </script>
+    <script type="module" src="game.js"></script>
+    <link rel="stylesheet" type="text/css" href="style.css">
+  </head>
+  <body>
+    <header>
+
+    </header>
+    <main>
+      <canvas id="three-canvas"></canvas>
+      <div id="progress-bar-container">
+        <div id="progress-bar">
+          <div id="progress-fill"></div>
+        </div>
+        <div id="time-display"></div>
+          <span id="current-time">0:00</span> / <span id="duration">0:00</span>
+        </div>
+      </div>
+      <div id="controlls">
+        <label>Noise Scale<input type="range" id="noise-scale"></label>
+        <label>Noise Amount<input type="range" id="noise-amount"></label>
+    </main>
+    <footer>
+      
+    </footer>
+  </body>
+</html>
