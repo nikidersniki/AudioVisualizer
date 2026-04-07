@@ -15,8 +15,12 @@ body{
     z-index: 100;
     width: 100%;
     color: #fff;
-    font-family: Arial, sans-serif;
+    font-family: 'Courier New', Courier, monospace;
     font-size: 16px;
+    backdrop-filter: blur(20px); 
+    background-color: #00000081;
+    border-top: 1px solid #ffffff;
+    padding-top: 30px;
 }
 
 #progress-bar {
@@ -24,7 +28,7 @@ body{
     left: 10px;
     right: 10px;
     height: 6px;
-    background-color: #333;
+    background-color: #242424ec;
     border-radius: 3px;
     cursor: pointer;
     box-sizing: border-box;
@@ -34,7 +38,8 @@ body{
 
 #progress-fill {
     height: 100%;
-    background-color: #00aaff;
+    background-color: #3d3d3d;
+    border: 1px solid #646464;
     border-radius: 3px;
     width: 0%;
     transition: width 0.1s linear;
@@ -46,7 +51,7 @@ body{
 #controlls{
     background-color: #00000081;
     z-index: 10000;
-    width: 250px;
+    width: auto;
     position: absolute;
     right:0;
     top:0;
@@ -54,6 +59,43 @@ body{
     justify-content: center;
     flex-direction: column;
     backdrop-filter: blur(20px); 
+    border: 1px solid #ffffff;
+    border-width: 0px 0px 1px 1px;
+    border-bottom-left-radius: 5px;
+}
+#player{ 
+    background-color: #00000081;
+    z-index: 10000;
+    width: auto;
+    position: absolute;
+    left:0;
+    top:0;
+    display: flex;
+    justify-content: center;
+    flex-direction: column;
+    backdrop-filter: blur(20px); 
+    border: 1px solid #ffffff;
+    border-width: 0px 1px 1px 0px;
+    border-bottom-right-radius: 5px;
+    font-family:'Courier New', Courier, monospace;
+    color: white;
+    padding: 5px;
+    text-align: center;
+}
+.track-button{
+    width: 100%;
+    padding: 5px;
+    margin: 2px 0;
+    background-color: #3d3d3d;
+    border: 1px solid #646464;
+    color: white;
+    font-size: auto;
+    cursor: pointer;
+    border-radius: 1px;
+    font-family:'Courier New', Courier, monospace;
+}
+.track-button:hover{
+    background-color: #646464;
 }
 #controlls label{
     display: flex;
@@ -61,5 +103,21 @@ body{
     justify-content: space-between;
     padding: 5px;
     color:white;
-    font-family: Arial, Helvetica, sans-serif;
+    font-family: 'Courier New', Courier, monospace;
+}
+input[type="file"] {
+width:80px;
+overflow: hidden;
+}
+#track-name{
+    font-size: 20px;
+    font-weight: bold;
+    text-align: center;
+    width: 100%;
+    position: absolute;
+    bottom: 5px;
+    left: 0px;
+    z-index: 1000;
+    color: #fff;
+    font-family: 'Courier New', Courier, monospace;
 }

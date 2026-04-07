@@ -25,11 +25,51 @@
         </div>
         <div id="time-display"></div>
           <span id="current-time">0:00</span> / <span id="duration">0:00</span>
-        </div>
       </div>
-      <div id="controlls">
-        <label>Noise Scale<input type="range" id="noise-scale"></label>
-        <label>Noise Amount<input type="range" id="noise-amount"></label>
+      <div id="now-playing">
+          <div id="track-name">No Track Loaded
+      </div>
+      </div>
+        <div id="controlls">
+          <label>Object Scale<input type="range" id="object-scale" min="0.1" max="2" step="0.1" value="1"></label>
+          <label>Noise Scale<input type="range" id="noise-scale" min="0.1" max="10" step="0.1" value="1"></label>
+          <label>Noise Amount<input type="range" id="noise-amount" min="0" max="10" step="0.1" value="1"></label>
+          <label>Rotate Background<input type="checkbox" id="bg-spin"></label>
+          <label>Background Light<input type="range" id="bg-light" min="0" max="100" step="0.1" value="1"></label>
+          <label>Background Gradient<input type="checkbox" id="bg-gradient" checked></label>
+          <label>Background Color<input type="color" id="bg-color" value="#000000"></label>
+          <label>Model<select id="model-select">
+            <option value="duck">Duck</option>
+            <option value="eco-sphere">Eco Sphere</option>
+            <option value="monke">Monke</option>
+          </select></label>
+          <label>Rotate Model<input type="checkbox" id="model-spin"></label>
+          <label>Model Rotation Speed<input type="range" id="model-rotation-speed" min="0.01" max="30" step="0.01" value="1"></label>
+          <label>Model Material<select id="model-material">
+            <option value="normal">Normal</option>
+            <option value="wireframe">Wireframe</option>
+            <option value="standard">Standard</option>
+          </select></label>
+        
+          <!-- Only shown when Standard is selected -->
+          <div id="standard-material-controls" style="display:none">
+            <label>Model Color<input type="color" id="model-color" value="#888888"></label>
+            <label>Roughness<input type="range" id="model-roughness" min="0" max="1" step="0.01" value="1"></label>
+            <label>Metalness<input type="range" id="model-metalness" min="0" max="1" step="0.01" value="0"></label>
+          </div>
+          <label style="display: none;">Wire Color<input type="color" id="wire-color" value="#888888"></label>
+          <label>Color Change<input type="checkbox" id="color-change"></label>
+          <label>Change Material<input type="checkbox" id="change-material"></label>
+          <label>Material Threshold<input type="range" id="change-material-threshold" min="0.001" max="0.1" step="0.001" value="0.01"></label>
+          <label>Bloom Strength<input type="range" id="bloom-strength" min="0" max="3" step="0.1" value="0.1"></label>
+          <label>Bloom Radius<input type="range" id="bloom-radius" min="  0" max="1" step="0.1" value="1.0"></label>
+          <label>Bloom Threshold<input type="range" id="bloom-threshold" min="0" max="1" step="0.01" value="0.1"></label>
+        </div>
+        <div id="player">
+          <div>Saved Tracks</div>
+          <div id="saved-tracks"></div>
+          <label>Add Track  <input type="file" id="audio-file" accept="audio/*"></label>
+        </div>
     </main>
     <footer>
       
