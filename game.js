@@ -23,6 +23,8 @@ const width = window.innerWidth, height = window.innerHeight;
 const camera = new PerspectiveCamera( 70, width / height, 0.01, 10 );
 camera.position.z = 3;
 
+
+
 let RotateBackground = false;
 let rotateModel = false;
 let modelRotationSpeed = 1;
@@ -40,6 +42,8 @@ let modelMetalness = 0;
 let bloomStrength = 0.1;
 let bloomRadius = 1.0;
 let bloomThreshold = 0.1;
+
+
 
 // IndexedDB setup for caching audio files
 const DB_NAME = "AudioDB";
@@ -274,9 +278,9 @@ function loadAudioFromFile(file) {
     };
     reader.readAsArrayBuffer(file);
 }
-
+let allFiles = [];
 window.addEventListener("load", async () => {
-    const allFiles = await loadAllAudioFiles();
+    allFiles = await loadAllAudioFiles();
 
     if (allFiles.length > 0) {
         allFiles.forEach(f => {
@@ -494,6 +498,7 @@ function playAudioFromTime(offsetTime) {
     audioSource.start(0, offsetTime);
 }
 
+
 function updateProgressBar() {
     if (!isDragging && audioBuffer && audioContext) {
         let currentTime;
@@ -591,6 +596,7 @@ function animate( time ) {
     group.rotation.z = RotateBackground ? (time / 2000) + (Math.round(data) / 500) : 0;
 
     composer.render();
+
 }
 
 renderer.setAnimationLoop(animate);
