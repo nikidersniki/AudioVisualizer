@@ -363,35 +363,117 @@ function updateStandardControlsVisibility() {
     }
 }
 updateStandardControlsVisibility();
+const layerList = [];
+
+
+function refreshCounters() {
+    Array.from(document.getElementsByClassName('layer-item'))
+        .forEach((item, i) => {
+            item.querySelector('.layer-count').textContent = i + 1;
+        });
+}
+
+function addLayerToStack(layerName, isBaseLayer) {
+    layerList.push({ name: layerName, isBase: isBaseLayer });
+
+    const layer = document.createElement('div');
+    layer.classList.add('list-button', 'layer-item');
+
+    const content = document.createElement('div');
+    content.classList.add('layer-content');
+
+    const count = document.createElement('div');
+    count.classList.add('layer-count');
+
+    const name = document.createElement('div');
+    name.textContent = layerName || 'Unnamed Layer';
+
+    const buttonBox = document.createElement('div');
+    buttonBox.classList.add('layer-buttons');
+
+    content.appendChild(count);
+    content.appendChild(name);
+    content.appendChild(buttonBox);
+    layer.appendChild(content);
+
+    if (isBaseLayer !== true) {
+        const upButton = document.createElement('div');
+        upButton.classList.add('move-up', 'image-button');
+        upButton.addEventListener('click', () => {
+            const container = document.getElementById('layer-list');
+            const items = Array.from(container.getElementsByClassName('layer-item'));
+            const domIndex = items.indexOf(layer);
+            const listIndex = layerList.findIndex(l => l.name === layerName);
+
+            if (domIndex > 1) { // Prevent moving above base layer
+                container.insertBefore(layer, items[domIndex - 1]);
+            }
+            if (listIndex < layerList.length - 1) {
+                [layerList[listIndex], layerList[listIndex + 1]] =
+                    [layerList[listIndex + 1], layerList[listIndex]];
+            }
+            refreshCounters();
+        });
+
+        const downButton = document.createElement('div');
+        downButton.classList.add('move-down', 'image-button');
+        downButton.addEventListener('click', () => {
+            const container = document.getElementById('layer-list');
+            const items = Array.from(container.getElementsByClassName('layer-item'));
+            const domIndex = items.indexOf(layer);
+            const listIndex = layerList.findIndex(l => l.name === layerName);
+
+            if (domIndex < items.length - 1) {
+                container.insertBefore(items[domIndex + 1], layer);
+            }
+            if (listIndex > 0) {
+                [layerList[listIndex], layerList[listIndex - 1]] =
+                    [layerList[listIndex - 1], layerList[listIndex]];
+            }
+            refreshCounters();
+        });
+
+        const removeButton = document.createElement('div');
+        removeButton.classList.add('remove-layer', 'image-button');
+        removeButton.addEventListener('click', () => {
+            const listIndex = layerList.findIndex(l => l.name === layerName);
+            if (listIndex !== -1) layerList.splice(listIndex, 1);
+            layer.remove();
+            refreshCounters();
+        });
+
+        buttonBox.appendChild(removeButton);
+        buttonBox.appendChild(upButton);
+        buttonBox.appendChild(downButton);
+    }
+    layer.addEventListener('click', () => {
+        selectLayer(layerName);}); 
+    document.getElementById('layer-list').appendChild(layer);
+    refreshCounters();
+}
+
+function selectLayer(layerName) {   
+    document.getElementById('current-layer-controls').children[0].textContent = `${layerName}`;   
+    Array.from(document.getElementsByClassName('layer-item'))        .forEach(item => {
+            const name = item.querySelector('.layer-content > div:nth-child(2)').textContent;
+            const domLayer = item;
+            const isSelected = name === layerName;
+
+            if (isSelected) {
+                domLayer.classList.add('selected');
+            } else {
+                domLayer.classList.remove('selected');
+            }
+        }    );
+}
+addLayerToStack('Background', true);
+selectLayer('Background');
 
 // --- Control event listeners ---
 document.getElementById('add-layer').addEventListener('click', () => {
-    const Layer = document.createElement('div');
-    Layer.classList.add('list-button');
-    Layer.classList.add('layer-item');  
-    const content = document.createElement('div');  
-    content.classList.add('layer-content');
-    const name = document.createElement('div');
-    name.textContent = prompt('Enter layer name:') || 'Unnamed Layer';   
-    const count = document.createElement('div');
-    count.textContent = `${document.getElementsByClassName('layer-item').length}`;
-    const buttonBox = document.createElement('div');
-    buttonBox.classList.add('layer-buttons');
-    content.appendChild(count); 
-    content.appendChild(name);
-    content.appendChild(buttonBox);
-    const upButton = document.createElement('div');
-    const downButton = document.createElement('div');    
-    const removeButton = document.createElement('div');
-    upButton.classList.add('move-up', 'image-button');  
-    downButton.classList.add('move-down', 'image-button');
-    removeButton.classList.add('remove-layer', 'image-button');
-    buttonBox.appendChild(upButton);
-    buttonBox.appendChild(downButton);
-    buttonBox.appendChild(removeButton);
-    Layer.appendChild(content);
-    document.getElementById('layer-list').appendChild(Layer);
+    addLayerToStack(prompt('Enter layer name:'));
 });
+
 
 
 document.getElementById('audio-file').addEventListener('change', async (e) => {
