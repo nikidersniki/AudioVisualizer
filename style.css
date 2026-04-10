@@ -82,8 +82,26 @@ body{
     padding: 5px;
     text-align: center;
 }
-.track-button{
-    width: 100%;
+.h1{
+    color: white;
+    font-size: x-large;
+    font-weight: bold;
+    font-family:'Courier New', Courier, monospace;
+    text-align: center;
+}
+.h2{
+    color: white;
+    font-size: large;
+    font-weight: bold;
+    font-family:'Courier New', Courier, monospace;
+    text-align: center;
+}
+.list-button{
+    width: auto;
+    display: flex;
+    flex-direction: row;
+    width: calc(100% - 10px);
+    justify-content: stretch;
     padding: 5px;
     margin: 2px 0;
     background-color: #3d3d3d;
@@ -94,7 +112,7 @@ body{
     border-radius: 1px;
     font-family:'Courier New', Courier, monospace;
 }
-.track-button:hover{
+.list-button:hover{
     background-color: #646464;
 }
 #controlls label{
@@ -103,6 +121,7 @@ body{
     justify-content: space-between;
     padding: 5px;
     color:white;
+    font-size: medium;
     font-family: 'Courier New', Courier, monospace;
 }
 input[type="file"] {
@@ -120,4 +139,65 @@ overflow: hidden;
     z-index: 1000;
     color: #fff;
     font-family: 'Courier New', Courier, monospace;
+}
+.hide-button{
+    background-image: url('Graphics/hide-svgrepo-com.svg');
+    position: absolute;
+    z-index: 10001;
+}
+#hide-controlls{
+    top: 5px;
+    right: 5px;
+}
+#hide-player{
+    top: 5px;
+    left: 5px;
+}
+#layer-header{
+    background-color: #00000081;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px;
+    margin-top: 10px;
+    border-bottom: 1px solid #ffffff;
+    border-top: 1px solid #ffffff;
+}
+.image-button{
+    width: 20px;
+    height: 20px;
+    background-color: #3d3d3d;
+    color: white;
+    font-size: auto;
+    cursor: pointer;
+    border-radius: 1px;
+    background-size: cover;
+    padding: 2px;
+}   
+#add-layer{
+    background-image: url('Graphics/plus-svgrepo-com.svg');
+}
+#layer-list{
+    display: flex;
+    flex-direction: column;
+    padding: 5px;
+}
+.layer-item>div{
+    display: flex;  
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+}
+.move-up{
+    background-image: url('Graphics/arrowup-svgrepo-com.svg');
+}
+.move-down{
+    background-image: url('Graphics/arrowdown-svgrepo-com.svg');
+}
+.remove-layer{
+    background-image: url('Graphics/minus-svgrepo-com.svg');
+}
+.layer-buttons{
+    display: flex;
+    flex-direction: row;
 }

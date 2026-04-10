@@ -16,11 +16,10 @@ import { UnrealBloomPass } from './modules/three.js/examples/jsm/postprocessing/
 import { OutputPass } from './modules/three.js/examples/jsm/postprocessing/OutputPass.js';import { EffectComposer } from './modules/three.js/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from './modules/three.js/examples/jsm/postprocessing/RenderPass.js';
 
-
 // Init Window dimensions
 const width = window.innerWidth, height = window.innerHeight;
 
-const camera = new PerspectiveCamera( 70, width / height, 0.01, 10 );
+const camera = new PerspectiveCamera( 70, width / height, 0.01, 1000);
 camera.position.z = 3;
 
 
@@ -42,6 +41,7 @@ let modelMetalness = 0;
 let bloomStrength = 0.1;
 let bloomRadius = 1.0;
 let bloomThreshold = 0.1;
+let Volume = 0.5; 
 
 
 
@@ -106,7 +106,8 @@ function applyMaterialToCurrentModel() {
 const models = [
     { name: 'duck', path: './models/duck-plush/source/Duck.fbx', scale: [0.01, 0.01, 0.01], position: [0, 0, 0] },
     { name: 'eco-sphere', path: './models/EcoSphrere.fbx', scale: [0.01, 0.01, 0.01], position: [0, 0, 0] },
-    { name: 'monke', path: './models/Monke.fbx', scale: [0.01, 0.01, 0.01], position: [0, 0, 0] }
+    { name: 'monke', path: './models/Monke.fbx', scale: [0.01, 0.01, 0.01], position: [0, 0, 0] },
+    { name: 'tube', path: './models/Tube.fbx', scale: [0.01, 0.01, 0.01], position: [0, 0, 5]}
 ];
 
 let modelName = 'duck';
@@ -123,11 +124,13 @@ function removeCurrentModel() {
     Object.values(loadedModels).forEach(obj => scene.remove(obj));
 }
 
-function loadModel( name ) {
+function loadModel( name, onLoaded, skipRemove = false ) {
     const model = models.get(name);
     if (!model) return;
 
-    removeCurrentModel();
+    if (!skipRemove) {
+        removeCurrentModel();
+    }
 
     if (loadedModels[name]) {
         loadedModels[name].traverse( child => {
@@ -140,6 +143,7 @@ function loadModel( name ) {
             }
         });
         scene.add(loadedModels[name]);
+        if (onLoaded) onLoaded(loadedModels[name]);
     } else {
         const loader = getLoaderForFile(model.path);
         loader.load( model.path, object => {
@@ -164,6 +168,7 @@ function loadModel( name ) {
             });
 
             scene.add(loadedModels[name]);
+            if (onLoaded) onLoaded(loadedModels[name]);
         }, undefined, error => console.error('Model load error:', error) );
     }
 }
@@ -227,6 +232,17 @@ bloomPass.clearColor = new Color(0x0d0d0d);
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
 
+//UI
+document.getElementById('hide-player').addEventListener('click', () => {
+    const ui = document.getElementById('player');
+    ui.style.display = ui.style.display === 'none' ? 'block' : 'none';
+});
+document.getElementById('hide-controlls').addEventListener('click', () => {
+    const ui = document.getElementById('controlls');
+    ui.style.display = ui.style.display === 'none' ? 'block' : 'none';
+});
+
+
 // Audio setup
 const listener = new AudioListener();
 camera.add( listener );
@@ -259,7 +275,7 @@ function applyAudioBuffer(buffer) {
     audioSource = null;
     sound.setBuffer(buffer);
     sound.setLoop(false);
-    sound.setVolume(0.5);
+    sound.setVolume(Volume);
     durationDisplay.textContent = formatTime(buffer.duration);
     audioContext = listener.context;
     startTime = audioContext.currentTime;
@@ -278,21 +294,24 @@ function loadAudioFromFile(file) {
     };
     reader.readAsArrayBuffer(file);
 }
+
 let allFiles = [];
 window.addEventListener("load", async () => {
     allFiles = await loadAllAudioFiles();
 
     if (allFiles.length > 0) {
-        allFiles.forEach(f => {
-            let lI = document.createElement('div');
-            let button = document.createElement('button');
-            button.textContent = f.name;
-            button.classList.add('track-button');
+        for (const f of allFiles) {
+            const songName = await readID3Title(f);
+        
+            const lI = document.createElement('div');
+            const button = document.createElement('button');
+            button.textContent = songName || f.name; // f.name is the stored string
+            button.classList.add('list-button');
             button.onclick = () => loadAudioFromFile(f.file);
             lI.appendChild(button);
             document.getElementById('saved-tracks').appendChild(lI);
-        }   );
         }
+    }
 
         // auto-load first one
         loadAudioFromFile(allFiles[0].file);
@@ -346,6 +365,34 @@ function updateStandardControlsVisibility() {
 updateStandardControlsVisibility();
 
 // --- Control event listeners ---
+document.getElementById('add-layer').addEventListener('click', () => {
+    const Layer = document.createElement('div');
+    Layer.classList.add('list-button');
+    Layer.classList.add('layer-item');  
+    const content = document.createElement('div');  
+    content.classList.add('layer-content');
+    const name = document.createElement('div');
+    name.textContent = prompt('Enter layer name:') || 'Unnamed Layer';   
+    const count = document.createElement('div');
+    count.textContent = `${document.getElementsByClassName('layer-item').length}`;
+    const buttonBox = document.createElement('div');
+    buttonBox.classList.add('layer-buttons');
+    content.appendChild(count); 
+    content.appendChild(name);
+    content.appendChild(buttonBox);
+    const upButton = document.createElement('div');
+    const downButton = document.createElement('div');    
+    const removeButton = document.createElement('div');
+    upButton.classList.add('move-up', 'image-button');  
+    downButton.classList.add('move-down', 'image-button');
+    removeButton.classList.add('remove-layer', 'image-button');
+    buttonBox.appendChild(upButton);
+    buttonBox.appendChild(downButton);
+    buttonBox.appendChild(removeButton);
+    Layer.appendChild(content);
+    document.getElementById('layer-list').appendChild(Layer);
+});
+
 
 document.getElementById('audio-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
@@ -363,6 +410,10 @@ document.getElementById('audio-file').addEventListener('change', async (e) => {
 
 document.getElementById('bg-spin').addEventListener('change', (e) => {
     RotateBackground = e.target.checked;
+});
+
+document.getElementById('audio-volume').addEventListener('input', (e) => {
+    Volume = parseFloat(e.target.value);
 });
 
 document.getElementById('model-rotation-speed').addEventListener('input', (e) => {
@@ -429,13 +480,30 @@ document.getElementById('bloom-threshold').addEventListener('input', (e) => {
     });
 });
 
+document.getElementById('background-select').addEventListener('change', (e) => {
+    const selected = e.target.value;
+    if (selected === 'Texture') {
+    }
+    else if (selected === 'Tube') {
+        loadModel('tube', (tube) => {
+            tube.traverse(child => {
+                if (child.isMesh) child.material = wireframeMaterial;
+            });
+            scene.remove(group);
+        }, true);
+    }
+    else if (selected === 'Color') {
+    }
+    else{
+
+    }
+});
 
 document.getElementById('bg-color').addEventListener('input', (e) => {
     bgMaterial.color.set(e.target.value);
     bgMaterialNoGradient.color.set(e.target.value);
     pointLight.color.set(e.target.value);
 });
-
 
 document.getElementById('bg-gradient').addEventListener('change', (e) => {
     const materialToUse = e.target.checked ? bgMaterial : bgMaterialNoGradient;
@@ -596,7 +664,7 @@ function animate( time ) {
     group.rotation.z = RotateBackground ? (time / 2000) + (Math.round(data) / 500) : 0;
 
     composer.render();
-
+    sound.setVolume(Volume);
 }
 
 renderer.setAnimationLoop(animate);
