@@ -1,272 +1,97 @@
 import {
-  AudioListener, Audio, AudioLoader, AudioAnalyser,
-  PerspectiveCamera, Scene, BoxGeometry, MeshNormalMaterial,
-  Mesh, WebGLRenderer, MeshBasicMaterial, Group, ShapeGeometry,
-  DoubleSide, Box3, Vector3, DynamicDrawUsage,
-  NoToneMapping, PointLight,
-  MeshStandardMaterial, Color, TextureLoader, EquirectangularReflectionMapping, Vector2
+    AudioListener, Audio, AudioAnalyser,
 } from './modules/three.js/build/three.module.js';
 
-import { OBJLoader } from './modules/three.js/examples/jsm/loaders/OBJLoader.js';
-import { FBXLoader } from './modules/three.js/examples/jsm/loaders/FBXLoader.js';
-import { SVGLoader } from './modules/three.js/examples/jsm/loaders/SVGLoader.js';
-import { SimplexNoise } from './modules/three.js/examples/jsm/math/SimplexNoise.js';
-import { EXRLoader } from './modules/three.js/examples/jsm/loaders/EXRLoader.js';
-import { UnrealBloomPass } from './modules/three.js/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { OutputPass } from './modules/three.js/examples/jsm/postprocessing/OutputPass.js';import { EffectComposer } from './modules/three.js/examples/jsm/postprocessing/EffectComposer.js';
-import { RenderPass } from './modules/three.js/examples/jsm/postprocessing/RenderPass.js';
+import { SceneBuilder, PRESETS}    from './SceneBuilder.js';
+import { Layer, ModelObject, PointLightObject, PropertyBinding} from './Sceneobjects.js';
 
-// Init Window dimensions
-const width = window.innerWidth, height = window.innerHeight;
+// ─────────────────────────────────────────────
+//  Scene
+// ─────────────────────────────────────────────
+const canvas  = document.getElementById('three-canvas');
+const builder = new SceneBuilder(canvas);
 
-const camera = new PerspectiveCamera( 70, width / height, 0.01, 1000);
-camera.position.z = 3;
+// ─────────────────────────────────────────────
+//  Audio
+// ─────────────────────────────────────────────
+const listener = new AudioListener();
+builder.camera.add(listener);
+const sound    = new Audio(listener);
+const analyser = new AudioAnalyser(sound, 32);
 
+let audioBuffer = null;
+let audioContext = null;
+let audioSource  = null;
+let startTime    = 0;
+let pauseTime    = 0;
+let isPlaying    = false;
+let isDragging   = false;
+let Volume       = 1;
 
-
-let RotateBackground = false;
-let rotateModel = false;
-let modelRotationSpeed = 1;
-let NoiseScale = 1;
-let NoiseAmount = 1;
-let objectScale = 1;
-let ColorChange = false;
-let changeMaterial = false;
-let changeMaterialThreshold = 0.01;
-let currentMaterial = 'normal';
-let lightIntensity = 1;
-let modelColor = 0x888888;
-let modelRoughness = 1;
-let modelMetalness = 0;
-let bloomStrength = 0.1;
-let bloomRadius = 1.0;
-let bloomThreshold = 0.1;
-let Volume = 0.5; 
-
-
-
-// IndexedDB setup for caching audio files
-const DB_NAME = "AudioDB";
-const STORE_NAME = "files";
+// ─────────────────────────────────────────────
+//  IndexedDB
+// ─────────────────────────────────────────────
+const DB_NAME     = 'AudioDB';
+const STORE_NAME  = 'files';
+const LAYERS_STORE = 'layers';
 
 function openDB() {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open(DB_NAME, 1);
-
-        request.onupgradeneeded = () => {
-            const db = request.result;
-            db.createObjectStore(STORE_NAME, { keyPath: "id" });
+        const req = indexedDB.open(DB_NAME, 2);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(STORE_NAME))
+                db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+            if (!db.objectStoreNames.contains(LAYERS_STORE))
+                db.createObjectStore(LAYERS_STORE, { keyPath: 'id' });
         };
-
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror   = () => reject(req.error);
     });
 }
 
-
-const scene = new Scene();
-scene.background = new Color(0x000000);
-
-const normalMaterial = new MeshNormalMaterial();
-const wireframeMaterial = new MeshBasicMaterial( { wireframe: true, color: 0xffffff} );
-const standardMaterial = new MeshStandardMaterial({
-    color: 0x000000,
-    roughness: modelRoughness,
-    metalness: modelMetalness,
-    flatShading: false 
-});
-const bgMaterial = new MeshStandardMaterial( { color: 0x888888, roughness: 1 } );
-const bgMaterialNoGradient = new MeshBasicMaterial( { color: 0x888888} );
-
-new EXRLoader().load('./Graphics/pond_bridge_night_1k.exr', (texture) => {
-    // This is critical for reflections to work correctly on spheres/meshes
-    texture.mapping = EquirectangularReflectionMapping;
-
-    // Assign to the whole scene OR just a specific material
-    standardMaterial.envMap = texture;
-    standardMaterial.needsUpdate = true;
-});
-
-
-function getActiveMaterial() {
-    if (currentMaterial === 'normal') return normalMaterial;
-    if (currentMaterial === 'wireframe') return wireframeMaterial;
-    return standardMaterial;
+async function saveAudioFile(file) {
+    const db    = await openDB();
+    const tx    = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put({
+        id: Date.now() + '_' + file.name, file, name: file.name, type: file.type
+    });
+    return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
 }
 
-function applyMaterialToCurrentModel() {
-    if (!loadedModels[modelName]) return;
-    const mat = getActiveMaterial();
-    loadedModels[modelName].traverse(child => {
-        if (child.isMesh) child.material = mat;
+async function loadAllAudioFiles() {
+    const db  = await openDB();
+    const tx  = db.transaction(STORE_NAME, 'readonly');
+    return new Promise((res, rej) => {
+        const req = tx.objectStore(STORE_NAME).getAll();
+        req.onsuccess = () => res(req.result);
+        req.onerror   = () => rej(req.error);
     });
 }
 
-//model list
-const models = [
-    { name: 'duck', path: './models/duck-plush/source/Duck.fbx', scale: [0.01, 0.01, 0.01], position: [0, 0, 0] },
-    { name: 'eco-sphere', path: './models/EcoSphrere.fbx', scale: [0.01, 0.01, 0.01], position: [0, 0, 0] },
-    { name: 'monke', path: './models/Monke.fbx', scale: [0.01, 0.01, 0.01], position: [0, 0, 0] },
-    { name: 'tube', path: './models/Tube.fbx', scale: [0.01, 0.01, 0.01], position: [0, 0, 5]}
-];
-
-let modelName = 'duck';
-models.get = (name) => models.find(m => m.name === name);
-const loadedModels = {};
-
-function getLoaderForFile( filePath ) {
-    const extension = filePath.split( '.' ).pop().toLowerCase();
-    if ( extension === 'fbx' ) return new FBXLoader();
-    return new OBJLoader();
+async function saveLayersToDB() {
+    const db = await openDB();
+    const tx = db.transaction(LAYERS_STORE, 'readwrite');
+    tx.objectStore(LAYERS_STORE).put({ id: 'current', layers: builder.toJSON() });
+    return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
 }
 
-function removeCurrentModel() {
-    Object.values(loadedModels).forEach(obj => scene.remove(obj));
+async function loadLayersFromDB() {
+    const db = await openDB();
+    const tx = db.transaction(LAYERS_STORE, 'readonly');
+    return new Promise((res, rej) => {
+        const req = tx.objectStore(LAYERS_STORE).get('current');
+        req.onsuccess = () => res(req.result?.layers ?? null);
+        req.onerror   = () => rej(req.error);
+    });
 }
 
-function loadModel( name, onLoaded, skipRemove = false ) {
-    const model = models.get(name);
-    if (!model) return;
-
-    if (!skipRemove) {
-        removeCurrentModel();
-    }
-
-    if (loadedModels[name]) {
-        loadedModels[name].traverse( child => {
-            if ( child.isMesh && child.geometry && loadedModels[name].originalPositions[child.uuid] ) {
-                const original = loadedModels[name].originalPositions[child.uuid];
-                const positions = child.geometry.attributes.position;
-                for (let i = 0; i < original.length; i++) positions.array[i] = original[i];
-                positions.needsUpdate = true;
-                child.geometry.computeVertexNormals();
-            }
-        });
-        scene.add(loadedModels[name]);
-        if (onLoaded) onLoaded(loadedModels[name]);
-    } else {
-        const loader = getLoaderForFile(model.path);
-        loader.load( model.path, object => {
-            loadedModels[name] = object;
-            loadedModels[name].scale.set(...model.scale);
-            loadedModels[name].position.set(...model.position);
-            loadedModels[name].originalPositions = {};
-
-            loadedModels[name].traverse( child => {
-                if ( child.isMesh ) {
-                    child.material = getActiveMaterial();
-                    if (child.geometry) {
-                        child.geometry = child.geometry.clone();
-                        child.geometry.computeVertexNormals();
-                        if (child.geometry.attributes.position) {
-                            child.geometry.attributes.position.setUsage(DynamicDrawUsage);
-                        }
-                        const positions = child.geometry.attributes.position.array.slice();
-                        loadedModels[name].originalPositions[child.uuid] = positions;
-                    }
-                }
-            });
-
-            scene.add(loadedModels[name]);
-            if (onLoaded) onLoaded(loadedModels[name]);
-        }, undefined, error => console.error('Model load error:', error) );
-    }
-}
-
-document.getElementById('model-select').addEventListener('change', (e) => {
-    modelName = e.target.value;
-    loadModel(modelName);
-});
-
-loadModel(modelName);
-
-// SVG loader for background
-const group = new Group();
-const svgLoader = new SVGLoader();
-svgLoader.loadAsync('./Graphics/spiral.svg').then(data => {
-    const paths = data.paths;
-    const svgGroup = new Group();
-
-    for (let i = 0; i < paths.length; i++) {
-        const path = paths[i];
-        const shapes = SVGLoader.createShapes(path);
-        for (let j = 0; j < shapes.length; j++) {
-            const shape = shapes[j];
-            const geometry = new ShapeGeometry(shape);
-            const mesh = new Mesh(geometry, bgMaterial);
-            svgGroup.add(mesh);
-        }
-    }
-
-    const box = new Box3().setFromObject(svgGroup);
-    const center = new Vector3();
-    box.getCenter(center);
-    svgGroup.position.x = -center.x;
-    svgGroup.position.y = -center.y;
-
-    group.add(svgGroup);
-    group.scale.set(0.01, 0.01, 0.1);
-    group.position.z = -1;
-    scene.add(group);
-});
-
-// Light — keep a reference so we can update intensity
-const pointLight = new PointLight( 0xffffff, lightIntensity, 100 );
-scene.add( pointLight );
-
-const canvas = document.getElementById( 'three-canvas' );
-const renderer = new WebGLRenderer( { antialias: true, canvas } );
-renderer.setSize( width, height );
-
-// --- Post Processing ---
-const composer = new EffectComposer(renderer);
-composer.addPass(new RenderPass(scene, camera));
-
-const bloomPass = new UnrealBloomPass(
-    new Vector2(width, height), // resolution
-    bloomStrength,   // strength
-    bloomRadius,   // radius
-    bloomThreshold      // threshold
-);
-bloomPass.clearColor = new Color(0x0d0d0d);
-composer.addPass(bloomPass);
-composer.addPass(new OutputPass());
-
-//UI
-document.getElementById('hide-player').addEventListener('click', () => {
-    const ui = document.getElementById('player');
-    ui.style.display = ui.style.display === 'none' ? 'block' : 'none';
-});
-document.getElementById('hide-controlls').addEventListener('click', () => {
-    const ui = document.getElementById('controlls');
-    ui.style.display = ui.style.display === 'none' ? 'block' : 'none';
-});
-
-
-// Audio setup
-const listener = new AudioListener();
-camera.add( listener );
-const sound = new Audio( listener );
-const analyser = new AudioAnalyser( sound, 32 );
-
-let audioBuffer = null;
-let isDragging = false;
-let audioContext = null;
-let audioSource = null;
-let startTime = 0;
-let pauseTime = 0;
-let isPlaying = false;
-
-const progressBar = document.getElementById('progress-bar');
-const progressFill = document.getElementById('progress-fill');
-const currentTimeDisplay = document.getElementById('current-time');
-const durationDisplay = document.getElementById('duration');
-
-function formatTime(seconds) {
-    if (isNaN(seconds)) return '0:00';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+// ─────────────────────────────────────────────
+//  Audio playback
+// ─────────────────────────────────────────────
+function formatTime(s) {
+    if (isNaN(s)) return '0:00';
+    return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 }
 
 function applyAudioBuffer(buffer) {
@@ -284,100 +109,195 @@ function applyAudioBuffer(buffer) {
     sound.play();
 }
 
-function loadAudioFromFile(file) {
+function loadAudioFromRecord(record) {
     const reader = new FileReader();
     reader.onload = async (e) => {
         audioContext = listener.context;
         const decoded = await audioContext.decodeAudioData(e.target.result);
-        document.getElementById('track-name').textContent = file.name;
+        document.getElementById('track-name').textContent = record.name;
         applyAudioBuffer(decoded);
     };
-    reader.readAsArrayBuffer(file);
+    reader.readAsArrayBuffer(record.file);
 }
 
-let allFiles = [];
-window.addEventListener("load", async () => {
-    allFiles = await loadAllAudioFiles();
+function playAudioFromTime(offsetTime) {
+    sound.stop();
+    isPlaying = false;
+    audioContext = listener.context;
+    if (audioSource) { try { audioSource.stop(); } catch(e) {} }
+    audioSource = audioContext.createBufferSource();
+    audioSource.buffer = audioBuffer;
+    audioSource.loop = false;
+    audioSource.connect(analyser.analyser);
+    analyser.analyser.connect(listener.getInput());
+    startTime = audioContext.currentTime - offsetTime;
+    pauseTime = offsetTime;
+    isPlaying = true;
+    audioSource.start(0, offsetTime);
+}
 
-    if (allFiles.length > 0) {
-        for (const f of allFiles) {
-            const songName = await readID3Title(f);
-        
-            const lI = document.createElement('div');
-            const button = document.createElement('button');
-            button.textContent = songName || f.name; // f.name is the stored string
-            button.classList.add('list-button');
-            button.onclick = () => loadAudioFromFile(f.file);
-            lI.appendChild(button);
-            document.getElementById('saved-tracks').appendChild(lI);
-        }
-    }
-
-        // auto-load first one
-        loadAudioFromFile(allFiles[0].file);
-    }
-);
-
-async function saveAudioFile(file) {
-    const db = await openDB();
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    const store = tx.objectStore(STORE_NAME);
-
-    const id = Date.now() + "_" + file.name; // unique id
-
-    store.put({
-        id: id,
-        file: file,
-        name: file.name,
-        type: file.type
-    });
-
+// ─────────────────────────────────────────────
+//  Popup Handler
+// ─────────────────────────────────────────────
+function spawnPopup(title, popupFields) {
     return new Promise((resolve, reject) => {
-        tx.oncomplete = resolve;
-        tx.onerror = reject;
+        let popupFill = document.createElement("div");
+        popupFill.classList.add('popup-bg');
+
+        let popup = document.createElement("div");
+        popup.classList.add("popup");
+
+        let titleText = document.createElement('div');
+        titleText.textContent = title;
+        titleText.classList.add('h1', 'popup-title-text');
+
+        let inputBox = document.createElement("div");
+        inputBox.classList.add('popup-input-box');
+
+        let inputs = [];
+
+        popupFields.forEach((element, index) => {
+            const [text, type, required] = element;
+            let input = document.createElement("input");
+            input.id = "popup-input-" + index;
+            if (type == "select"){
+                input = document.createElement("select");
+                element[2].forEach(element => {
+                    const z = document.createElement('option');
+                    const t = document.createTextNode(element);
+                    z.value = element;
+                    z.appendChild(t);
+                    input.appendChild(z);
+                });
+                input.id = "popup-input-" + index;            }
+            else{
+                input.type = type;
+            }
+
+            const nameField = document.createElement('div');
+            nameField.classList.add("h2");
+            nameField.textContent = text;
+
+            const box = document.createElement('div');
+            box.appendChild(nameField);
+            box.appendChild(input);
+
+            inputBox.appendChild(box);
+
+            inputs.push({ input, type, required, label: text });
+        });
+
+        const confirm = document.createElement('div');
+        confirm.textContent = "Confirm";
+        confirm.classList.add('big-Btn');
+
+        const cancel = document.createElement('div');
+        cancel.textContent = "Cancel";
+        cancel.classList.add('big-Btn');
+
+        const buttonBox = document.createElement('div');
+        buttonBox.appendChild(confirm);
+        buttonBox.appendChild(cancel);
+        buttonBox.classList.add("popup-button-box");
+
+        popup.appendChild(titleText);
+        popup.appendChild(inputBox);
+        popup.appendChild(buttonBox);
+        popupFill.appendChild(popup);
+        document.body.appendChild(popupFill);
+
+        confirm.onclick = () => {
+            let result = {};
+            let valid = true;
+
+            inputs.forEach((item, i) => {
+                let value;
+                if (item.type === "checkbox") {
+                    value = item.input.checked;
+                } else {
+                    value = item.input.value;
+                }
+                if (item.required && !value) {
+                    valid = false;
+                    item.input.style.border = "2px solid red";
+                }
+                result[item.label] = value;
+            });
+
+            if (!valid) return;
+            popupFill.remove();
+            resolve(result);
+        };
+
+        cancel.onclick = () => {
+            popupFill.remove();
+            reject("cancelled");
+        };
     });
 }
 
-async function loadAllAudioFiles() {
-    const db = await openDB();
-    const tx = db.transaction(STORE_NAME, "readonly");
-    const store = tx.objectStore(STORE_NAME);
+// ─────────────────────────────────────────────
+//  Progress bar
+// ─────────────────────────────────────────────
+const progressBar         = document.getElementById('progress-bar');
+const progressFill        = document.getElementById('progress-fill');
+const currentTimeDisplay  = document.getElementById('current-time');
+const durationDisplay     = document.getElementById('duration');
 
-    return new Promise((resolve, reject) => {
-        const request = store.getAll();
+function updateProgressBar() {
+    if (isDragging || !audioBuffer || !audioContext) return;
+    let currentTime;
+    if (isPlaying && !audioSource)  currentTime = audioContext.currentTime - startTime;
+    else if (isPlaying && audioSource) currentTime = audioContext.currentTime - startTime + pauseTime;
+    if (currentTime === undefined) return;
 
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-    });
+    const dur = audioBuffer.duration;
+    if (currentTime >= dur) {
+        isPlaying = false;
+        progressFill.style.width = '100%';
+        currentTimeDisplay.textContent = formatTime(dur);
+    } else {
+        progressFill.style.width = (currentTime / dur) * 100 + '%';
+        currentTimeDisplay.textContent = formatTime(currentTime);
+    }
 }
 
-// --- Standard material controls visibility ---
-const standardOnlyControls = document.getElementById('standard-material-controls');
-const wireColorControl = document.getElementById('wire-color').parentElement;
-function updateStandardControlsVisibility() {
-    if (standardOnlyControls) {
-        standardOnlyControls.style.display = currentMaterial === 'standard' ? '' : 'none';
-    }
-    if (wireColorControl) {
-        wireColorControl.style.display = currentMaterial === 'wireframe' ? '' : 'none';
-    }
-}
-updateStandardControlsVisibility();
-const layerList = [];
+progressBar.addEventListener('mousedown', () => {
+    isDragging = true;
+    if (audioSource) { audioSource.stop(); isPlaying = false; }
+});
+document.addEventListener('mouseup', () => { isDragging = false; });
+progressBar.addEventListener('click', (e) => {
+    if (!audioBuffer) return;
+    const rect    = progressBar.getBoundingClientRect();
+    const percent = (((e.clientX/2) - rect.left) / rect.width * 100).toFixed(2);
+    playAudioFromTime((percent / 100) * audioBuffer.duration);
+});
 
+// ─────────────────────────────────────────────
+//  Layer UI
+// ─────────────────────────────────────────────
+let selectedLayer = null;
+let selectedObject = null;
 
 function refreshCounters() {
     Array.from(document.getElementsByClassName('layer-item'))
-        .forEach((item, i) => {
-            item.querySelector('.layer-count').textContent = i + 1;
-        });
+        .forEach((el, i) => el.querySelector('.layer-count').textContent = i + 1);
 }
 
-function addLayerToStack(layerName, isBaseLayer) {
-    layerList.push({ name: layerName, isBase: isBaseLayer });
+function renderLayerList() {
+    const container = document.getElementById('layer-list');
+    container.innerHTML = '';
+    for (const layer of builder.layers) {
+        addLayerElement(layer);
+    }
+    refreshCounters();
+}
 
-    const layer = document.createElement('div');
-    layer.classList.add('list-button', 'layer-item');
+function addLayerElement(layer) {
+    const el = document.createElement('div');
+    el.classList.add('list-button', 'layer-item');
+    el.dataset.layerId = layer.id;
 
     const content = document.createElement('div');
     content.classList.add('layer-content');
@@ -386,7 +306,7 @@ function addLayerToStack(layerName, isBaseLayer) {
     count.classList.add('layer-count');
 
     const name = document.createElement('div');
-    name.textContent = layerName || 'Unnamed Layer';
+    name.textContent = layer.name;
 
     const buttonBox = document.createElement('div');
     buttonBox.classList.add('layer-buttons');
@@ -394,359 +314,663 @@ function addLayerToStack(layerName, isBaseLayer) {
     content.appendChild(count);
     content.appendChild(name);
     content.appendChild(buttonBox);
-    layer.appendChild(content);
+    el.appendChild(content);
 
-    if (isBaseLayer !== true) {
-        const upButton = document.createElement('div');
-        upButton.classList.add('move-up', 'image-button');
-        upButton.addEventListener('click', () => {
-            const container = document.getElementById('layer-list');
-            const items = Array.from(container.getElementsByClassName('layer-item'));
-            const domIndex = items.indexOf(layer);
-            const listIndex = layerList.findIndex(l => l.name === layerName);
+    if (!layer.isBase) {
+        const mkBtn = (cls) => {
+            const b = document.createElement('div');
+            b.classList.add(cls, 'image-button');
+            return b;
+        };
 
-            if (domIndex > 1) { // Prevent moving above base layer
-                container.insertBefore(layer, items[domIndex - 1]);
+        const upBtn = mkBtn('move-up');
+        upBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = builder.layers.indexOf(layer);
+            if (idx > 1) {
+                [builder.layers[idx], builder.layers[idx-1]] =
+                [builder.layers[idx-1], builder.layers[idx]];
+                renderLayerList();
+                saveLayersToDB();
             }
-            if (listIndex < layerList.length - 1) {
-                [layerList[listIndex], layerList[listIndex + 1]] =
-                    [layerList[listIndex + 1], layerList[listIndex]];
-            }
-            refreshCounters();
         });
 
-        const downButton = document.createElement('div');
-        downButton.classList.add('move-down', 'image-button');
-        downButton.addEventListener('click', () => {
-            const container = document.getElementById('layer-list');
-            const items = Array.from(container.getElementsByClassName('layer-item'));
-            const domIndex = items.indexOf(layer);
-            const listIndex = layerList.findIndex(l => l.name === layerName);
-
-            if (domIndex < items.length - 1) {
-                container.insertBefore(items[domIndex + 1], layer);
+        const downBtn = mkBtn('move-down');
+        downBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const idx = builder.layers.indexOf(layer);
+            if (idx < builder.layers.length - 1) {
+                [builder.layers[idx], builder.layers[idx+1]] =
+                [builder.layers[idx+1], builder.layers[idx]];
+                renderLayerList();
+                saveLayersToDB();
             }
-            if (listIndex > 0) {
-                [layerList[listIndex], layerList[listIndex - 1]] =
-                    [layerList[listIndex - 1], layerList[listIndex]];
-            }
-            refreshCounters();
         });
 
-        const removeButton = document.createElement('div');
-        removeButton.classList.add('remove-layer', 'image-button');
-        removeButton.addEventListener('click', () => {
-            const listIndex = layerList.findIndex(l => l.name === layerName);
-            if (listIndex !== -1) layerList.splice(listIndex, 1);
-            layer.remove();
-            refreshCounters();
+        const removeBtn = mkBtn('remove-layer');
+        removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            builder.removeLayer(layer.id);
+            renderLayerList();
+            saveLayersToDB();
         });
 
-        buttonBox.appendChild(removeButton);
-        buttonBox.appendChild(upButton);
-        buttonBox.appendChild(downButton);
+        buttonBox.appendChild(removeBtn);
+        buttonBox.appendChild(upBtn);
+        buttonBox.appendChild(downBtn);
     }
-    layer.addEventListener('click', () => {
-        selectLayer(layerName);}); 
-    document.getElementById('layer-list').appendChild(layer);
-    refreshCounters();
+
+    el.addEventListener('click', () => selectLayer(layer));
+    document.getElementById('layer-list').appendChild(el);
 }
 
-function selectLayer(layerName) {   
-    document.getElementById('current-layer-controls').children[0].textContent = `${layerName}`;   
-    Array.from(document.getElementsByClassName('layer-item'))        .forEach(item => {
-            const name = item.querySelector('.layer-content > div:nth-child(2)').textContent;
-            const domLayer = item;
-            const isSelected = name === layerName;
+function selectLayer(layer) {
+    selectedLayer = layer;
+    selectedObject = null;
 
-            if (isSelected) {
-                domLayer.classList.add('selected');
-            } else {
-                domLayer.classList.remove('selected');
+    document.querySelectorAll('.layer-item').forEach(el => {
+        el.classList.toggle('selected', el.dataset.layerId === layer.id);
+    });
+
+    document.getElementById('current-layer-controls').children[0].textContent = layer.name;
+
+    const buttonBox = document.getElementById('layerTopButtons');
+    buttonBox.innerHTML = '';
+
+    if (!layer.isBase) {
+        const addModel = document.createElement('div');
+        addModel.classList.add('Btn');
+        addModel.textContent = 'Add Model';
+        addModel.addEventListener('click', () => {
+            const availableModels = [];
+            PRESETS.MODEL_CATALOGUE.forEach(element => {
+                availableModels.push(element['name']);
+            });
+            spawnPopup('Add Model to Scene', [
+                ['Model', 'select', availableModels],
+                ['Name', 'text'],
+                ['Material', 'select', ["normal", "wireframe", "standard"]],
+                ['Scale Mode', 'select', ["avgFrequency","lowFreq","midFreq","highFreq"]],
+                ['Scale Source', 'select', ["constant","audio"]],
+            ])
+            .then(data => {
+                const {
+                    Model, Name, Material,
+                    "Scale Mode": scaleMode,
+                    "Scale Source": scaleSource,
+                } = data;
+                onAddModel(layer, Model, Name, scaleMode, scaleSource, Material);
+            })
+            .catch(() => {});
+        });
+
+        const addLight = document.createElement('div');
+        addLight.classList.add('Btn');
+        addLight.textContent = 'Add Light';
+        addLight.addEventListener('click', () => onAddLight(layer));
+
+        buttonBox.appendChild(addModel);
+        buttonBox.appendChild(addLight);
+    }
+
+    renderObjectList(layer);
+    document.getElementById('object-properties').innerHTML = '';
+}
+
+// ─────────────────────────────────────────────
+//  Object list UI
+// ─────────────────────────────────────────────
+function renderObjectList(layer) {
+    let listEl = document.getElementById('object-list');
+    listEl.innerHTML = '';
+
+    for (const obj of layer.objects) {
+        const row = document.createElement('div');
+        row.classList.add('list-button');
+        row.style.justifyContent = 'space-between';
+        row.dataset.objectId = obj.id;
+
+        row.addEventListener('click', () => selectObject(obj, layer));
+
+        const label = document.createElement('span');
+        label.textContent = obj.name;
+
+        const removeBtn = document.createElement('div');
+        removeBtn.classList.add('remove-layer', 'image-button');
+        removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (selectedObject && selectedObject.id === obj.id) {
+                selectedObject = null;
+                document.getElementById('object-properties').innerHTML = '';
             }
-        }    );
+            builder.removeObjectFromLayer(layer.id, obj.id);
+            renderObjectList(layer);
+            saveLayersToDB();
+        });
+
+        row.appendChild(label);
+        row.appendChild(removeBtn);
+        listEl.appendChild(row);
+    }
 }
-addLayerToStack('Background', true);
-selectLayer('Background');
 
-// --- Control event listeners ---
-document.getElementById('add-layer').addEventListener('click', () => {
-    addLayerToStack(prompt('Enter layer name:'));
+// ─────────────────────────────────────────────
+//  Object selection
+// ─────────────────────────────────────────────
+function selectObject(obj, layer) {
+    selectedObject = obj;
+
+    document.querySelectorAll('#object-list .list-button').forEach(el => {
+        el.classList.toggle('selected', el.dataset.objectId === obj.id);
+    });
+
+    renderObjectProperties(obj, layer);
+}
+
+// ─────────────────────────────────────────────
+//  Property panel builder
+// ─────────────────────────────────────────────
+
+const AUDIO_SOURCES = ['avgFrequency','lowFreq','midFreq','highFreq','peak','volume'];
+const CURVES        = ['linear','exponential','inverse'];
+
+function renderObjectProperties(obj, layer) {
+    const panel = document.getElementById('object-properties');
+    panel.innerHTML = '';
+
+    const save = () => saveLayersToDB();
+
+    // Helper: section header
+    function section(title) {
+        const h = document.createElement('div');
+        h.className = 'h2 prop-section-title';
+        h.textContent = title;
+        panel.appendChild(h);
+    }
+
+    // Helper: row wrapper
+    function row(label) {
+        const wrap = document.createElement('div');
+        wrap.className = 'prop-row';
+        const lbl = document.createElement('label');
+        lbl.className = 'prop-label';
+        lbl.textContent = label;
+        wrap.appendChild(lbl);
+        panel.appendChild(wrap);
+        return wrap;
+    }
+
+    // Text input
+    function textInput(label, getter, setter) {
+        const r = row(label);
+        const inp = document.createElement('input');
+        inp.type = 'text';
+        inp.className = 'prop-input';
+        inp.value = getter();
+        inp.addEventListener('input', () => { setter(inp.value); save(); });
+        r.appendChild(inp);
+    }
+
+    // Checkbox
+    function checkbox(label, getter, setter) {
+        const r = row(label);
+        const inp = document.createElement('input');
+        inp.type = 'checkbox';
+        inp.className = 'prop-checkbox';
+        inp.checked = getter();
+        inp.addEventListener('change', () => { setter(inp.checked); save(); });
+        r.appendChild(inp);
+    }
+
+    // Select
+    function selectInput(label, options, getter, setter) {
+        const r = row(label);
+        const sel = document.createElement('select');
+        sel.className = 'prop-select';
+        options.forEach(opt => {
+            const o = document.createElement('option');
+            o.value = o.textContent = opt;
+            sel.appendChild(o);
+        });
+        sel.value = getter();
+        sel.addEventListener('change', () => { setter(sel.value); save(); });
+        r.appendChild(sel);
+        return sel;
+    }
+
+    // Color picker
+    function colorInput(label, getter, setter) {
+        const r = row(label);
+        const inp = document.createElement('input');
+        inp.type = 'color';
+        inp.className = 'prop-color';
+        // normalize to #rrggbb
+        const val = getter();
+        inp.value = val.startsWith('#') ? val : '#888888';
+        inp.addEventListener('input', () => { setter(inp.value); save(); });
+        r.appendChild(inp);
+    }
+
+    // Slider
+    function slider(label, min, max, step, getter, setter) {
+        const r = row(label);
+        const wrap = document.createElement('div');
+        wrap.className = 'prop-slider-wrap';
+
+        const inp = document.createElement('input');
+        inp.type = 'range';
+        inp.className = 'prop-slider';
+        inp.min = min; inp.max = max; inp.step = step;
+        inp.value = getter();
+
+        const num = document.createElement('input');
+        num.type = 'number';
+        num.className = 'prop-number';
+        num.min = min; num.max = max; num.step = step;
+        num.value = getter();
+
+        inp.addEventListener('input', () => {
+            const v = parseFloat(inp.value);
+            num.value = v;
+            setter(v);
+            save();
+        });
+        num.addEventListener('input', () => {
+            const v = parseFloat(num.value);
+            inp.value = v;
+            setter(v);
+            save();
+        });
+
+        wrap.appendChild(inp);
+        wrap.appendChild(num);
+        r.appendChild(wrap);
+    }
+
+    // PropertyBinding sub-panel
+    function bindingPanel(label, binding, range = { min: -10, max: 10 }) {
+        const container = document.createElement('div');
+        container.className = 'prop-binding';
+        panel.appendChild(container);
+
+        const head = document.createElement('div');
+        head.className = 'prop-binding-title h2';
+        head.textContent = label;
+        container.appendChild(head);
+
+        // Mode toggle
+        const modeRow = document.createElement('div');
+        modeRow.className = 'prop-row';
+        const modeLbl = document.createElement('label');
+        modeLbl.className = 'prop-label';
+        modeLbl.textContent = 'Mode';
+        modeRow.appendChild(modeLbl);
+
+        const modeWrap = document.createElement('div');
+        modeWrap.className = 'prop-mode-toggle';
+
+        ['constant','audio'].forEach(m => {
+            const btn = document.createElement('div');
+            btn.textContent = m;
+            btn.className = 'mode-btn' + (binding.mode === m ? ' active' : '');
+            btn.addEventListener('click', () => {
+                binding.mode = m;
+                modeWrap.querySelectorAll('.mode-btn').forEach(b =>
+                    b.classList.toggle('active', b.textContent === m));
+                // show/hide relevant rows
+                constantSection.style.display = m === 'constant' ? '' : 'none';
+                audioSection.style.display    = m === 'audio'    ? '' : 'none';
+                save();
+            });
+            modeWrap.appendChild(btn);
+        });
+        modeRow.appendChild(modeWrap);
+        container.appendChild(modeRow);
+
+        // Constant value
+        const constantSection = document.createElement('div');
+        constantSection.style.display = binding.mode === 'constant' ? '' : 'none';
+        container.appendChild(constantSection);
+
+        const cSliderRow = document.createElement('div');
+        cSliderRow.className = 'prop-row';
+        const cLbl = document.createElement('label');
+        cLbl.className = 'prop-label';
+        cLbl.textContent = 'Value';
+        const cWrap = document.createElement('div');
+        cWrap.className = 'prop-slider-wrap';
+
+        const cSlider = document.createElement('input');
+        cSlider.type = 'range'; cSlider.className = 'prop-slider';
+        cSlider.min = range.min; cSlider.max = range.max; cSlider.step = 0.01;
+        cSlider.value = binding.value;
+
+        const cNum = document.createElement('input');
+        cNum.type = 'number'; cNum.className = 'prop-number';
+        cNum.step = 0.01; cNum.value = binding.value;
+
+        cSlider.addEventListener('input', () => {
+            binding.value = parseFloat(cSlider.value);
+            cNum.value = binding.value; save();
+        });
+        cNum.addEventListener('input', () => {
+            binding.value = parseFloat(cNum.value);
+            cSlider.value = binding.value; save();
+        });
+
+        cWrap.appendChild(cSlider); cWrap.appendChild(cNum);
+        cSliderRow.appendChild(cLbl); cSliderRow.appendChild(cWrap);
+        constantSection.appendChild(cSliderRow);
+
+        // Audio section
+        const audioSection = document.createElement('div');
+        audioSection.style.display = binding.mode === 'audio' ? '' : 'none';
+        container.appendChild(audioSection);
+
+        // Source select
+        const srcRow = document.createElement('div');
+        srcRow.className = 'prop-row';
+        const srcLbl = document.createElement('label');
+        srcLbl.className = 'prop-label'; srcLbl.textContent = 'Source';
+        const srcSel = document.createElement('select');
+        srcSel.className = 'prop-select';
+        AUDIO_SOURCES.forEach(s => {
+            const o = document.createElement('option');
+            o.value = o.textContent = s;
+            srcSel.appendChild(o);
+        });
+        srcSel.value = binding.source;
+        srcSel.addEventListener('change', () => { binding.source = srcSel.value; save(); });
+        srcRow.appendChild(srcLbl); srcRow.appendChild(srcSel);
+        audioSection.appendChild(srcRow);
+
+        // Curve select
+        const curveRow = document.createElement('div');
+        curveRow.className = 'prop-row';
+        const curveLbl = document.createElement('label');
+        curveLbl.className = 'prop-label'; curveLbl.textContent = 'Curve';
+        const curveSel = document.createElement('select');
+        curveSel.className = 'prop-select';
+        CURVES.forEach(c => {
+            const o = document.createElement('option');
+            o.value = o.textContent = c;
+            curveSel.appendChild(o);
+        });
+        curveSel.value = binding.curve;
+        curveSel.addEventListener('change', () => { binding.curve = curveSel.value; save(); });
+        curveRow.appendChild(curveLbl); curveRow.appendChild(curveSel);
+        audioSection.appendChild(curveRow);
+
+        // Min slider
+        const minRow = document.createElement('div');
+        minRow.className = 'prop-row';
+        const minLbl = document.createElement('label');
+        minLbl.className = 'prop-label'; minLbl.textContent = 'Min';
+        const minWrap = document.createElement('div');
+        minWrap.className = 'prop-slider-wrap';
+        const minSlider = document.createElement('input');
+        minSlider.type = 'range'; minSlider.className = 'prop-slider';
+        minSlider.min = range.min; minSlider.max = range.max; minSlider.step = 0.001;
+        minSlider.value = binding.min;
+        const minNum = document.createElement('input');
+        minNum.type = 'number'; minNum.className = 'prop-number';
+        minNum.step = 0.001; minNum.value = binding.min;
+        minSlider.addEventListener('input', () => {
+            binding.min = parseFloat(minSlider.value); minNum.value = binding.min; save();
+        });
+        minNum.addEventListener('input', () => {
+            binding.min = parseFloat(minNum.value); minSlider.value = binding.min; save();
+        });
+        minWrap.appendChild(minSlider); minWrap.appendChild(minNum);
+        minRow.appendChild(minLbl); minRow.appendChild(minWrap);
+        audioSection.appendChild(minRow);
+
+        // Max slider
+        const maxRow = document.createElement('div');
+        maxRow.className = 'prop-row';
+        const maxLbl = document.createElement('label');
+        maxLbl.className = 'prop-label'; maxLbl.textContent = 'Max';
+        const maxWrap = document.createElement('div');
+        maxWrap.className = 'prop-slider-wrap';
+        const maxSlider = document.createElement('input');
+        maxSlider.type = 'range'; maxSlider.className = 'prop-slider';
+        maxSlider.min = range.min; maxSlider.max = range.max; maxSlider.step = 0.001;
+        maxSlider.value = binding.max;
+        const maxNum = document.createElement('input');
+        maxNum.type = 'number'; maxNum.className = 'prop-number';
+        maxNum.step = 0.001; maxNum.value = binding.max;
+        maxSlider.addEventListener('input', () => {
+            binding.max = parseFloat(maxSlider.value); maxNum.value = binding.max; save();
+        });
+        maxNum.addEventListener('input', () => {
+            binding.max = parseFloat(maxNum.value); maxSlider.value = binding.max; save();
+        });
+        maxWrap.appendChild(maxSlider); maxWrap.appendChild(maxNum);
+        maxRow.appendChild(maxLbl); maxRow.appendChild(maxWrap);
+        audioSection.appendChild(maxRow);
+    }
+
+    // ── Common: Name + Visible ──────────────────
+    section('General');
+    textInput('Name', () => obj.name, v => { obj.name = v; renderObjectList(layer); });
+    checkbox('Visible', () => obj.visible, v => { obj.visible = v; });
+
+    // ── Transform bindings ──────────────────────
+    section('Position');
+    bindingPanel('Position X', obj.posX);
+    bindingPanel('Position Y', obj.posY);
+    bindingPanel('Position Z', obj.posZ);
+
+    section('Rotation');
+    bindingPanel('Rotation X', obj.rotX);
+    bindingPanel('Rotation Y', obj.rotY);
+    bindingPanel('Rotation Z', obj.rotZ);
+
+    section('Scale');
+    bindingPanel('Scale X', obj.scaleX);
+    bindingPanel('Scale Y', obj.scaleY);
+    bindingPanel('Scale Z', obj.scaleZ);
+
+    // ── Model-specific ──────────────────────────
+    if (obj.type === 'model') {
+        section('Model');
+
+        const availableModels = PRESETS.MODEL_CATALOGUE.map(m => m.name);
+        selectInput('Model', availableModels, () => obj.modelName, v => { obj.modelName = v; });
+
+        section('Material Properties');
+
+        selectInput('Material', ['normal','wireframe','standard'],
+            () => obj.materialType,
+            v => {
+                obj.materialType = v;
+                if (obj.threeObject) {
+                    obj.threeObject.traverse(child => {
+                        if (child.isMesh) child.material = PRESETS.materials[v] ?? PRESETS.materials.normal;
+                    });
+                }
+            }
+        );
+
+        colorInput('Color', () => obj.color, v => { obj.color = v; });
+
+        // Color reactive toggle + sensitivity (shown only when reactive)
+        const sensitivityRow = document.createElement('div');
+        sensitivityRow.style.display = obj.colorReactive ? '' : 'none';
+        const srWrap = document.createElement('div');
+        srWrap.className = 'prop-row';
+        const srLbl = document.createElement('label');
+        srLbl.className = 'prop-label';
+        srLbl.textContent = 'Color Sensitivity';
+        const srSliderWrap = document.createElement('div');
+        srSliderWrap.className = 'prop-slider-wrap';
+        const srSlider = document.createElement('input');
+        srSlider.type = 'range'; srSlider.className = 'prop-slider';
+        srSlider.min = 0; srSlider.max = 2; srSlider.step = 0.01;
+        srSlider.value = obj.colorSensitivity ?? 0.5;
+        const srNum = document.createElement('input');
+        srNum.type = 'number'; srNum.className = 'prop-number';
+        srNum.min = 0; srNum.max = 2; srNum.step = 0.01;
+        srNum.value = obj.colorSensitivity ?? 0.5;
+        srSlider.addEventListener('input', () => {
+            obj.colorSensitivity = parseFloat(srSlider.value);
+            srNum.value = obj.colorSensitivity; save();
+        });
+        srNum.addEventListener('input', () => {
+            obj.colorSensitivity = parseFloat(srNum.value);
+            srSlider.value = obj.colorSensitivity; save();
+        });
+        srSliderWrap.appendChild(srSlider); srSliderWrap.appendChild(srNum);
+        srWrap.appendChild(srLbl); srWrap.appendChild(srSliderWrap);
+        sensitivityRow.appendChild(srWrap);
+
+        const crRow = row('Color Reactive');
+        const crInp = document.createElement('input');
+        crInp.type = 'checkbox'; crInp.className = 'prop-checkbox';
+        crInp.checked = obj.colorReactive;
+        crInp.addEventListener('change', () => {
+            obj.colorReactive = crInp.checked;
+            sensitivityRow.style.display = obj.colorReactive ? '' : 'none';
+            save();
+        });
+        crRow.appendChild(crInp);
+        panel.appendChild(sensitivityRow);
+
+        bindingPanel('Roughness', obj.roughness, { min: 0, max: 1 });
+        bindingPanel('Metalness', obj.metalness, { min: 0, max: 1 });
+
+        section('Audio Scale');
+        bindingPanel('Audio Scale', obj.audioScale);
+
+        section('Spin');
+        bindingPanel('Spin Speed', obj.spinSpeed);
+
+        section('Noise');
+        bindingPanel('Noise Scale', obj.noiseScale);
+        bindingPanel('Noise Amount', obj.noiseAmount);
+    }
+
+    // ── PointLight-specific ─────────────────────
+    if (obj.type === 'pointLight') {
+        section('Light');
+        colorInput('Color', () => obj.color, v => { obj.color = v; });
+
+        section('Intensity');
+        bindingPanel('Intensity', obj.intensity);
+
+        section('Distance');
+        bindingPanel('Distance', obj.distance);
+    }
+}
+
+// ─────────────────────────────────────────────
+//  Add object handlers
+// ─────────────────────────────────────────────
+async function onAddModel(layer, model, modelDiplayName, scaleMode, scaleSource, Material) {
+    const modelObj = new ModelObject();
+    modelObj.audioScale.source   = scaleMode;
+    modelObj.audioScale.mode     = scaleSource;
+    modelObj.audioScale.min      = 0.5;
+    modelObj.audioScale.max      = 1.0;
+    modelObj.name                = modelDiplayName;
+    modelObj.modelName           = model;
+    modelObj.materialType        = Material;
+    await builder.addModelToLayer(layer.id, modelObj);
+    renderObjectList(layer);
+    saveLayersToDB();
+}
+
+function onAddLight(layer) {
+    const lightObj = new PointLightObject();
+    lightObj.intensity.mode   = 'audio';
+    lightObj.intensity.source = 'avgFrequency';
+    lightObj.intensity.min    = 0;
+    lightObj.intensity.max    = 10;
+
+    builder.addLightToLayer(layer.id, lightObj);
+    renderObjectList(layer);
+    saveLayersToDB();
+}
+
+// ─────────────────────────────────────────────
+//  Global controls
+// ─────────────────────────────────────────────
+document.getElementById('hide-player').addEventListener('click', () => {
+    const ui = document.getElementById('player');
+    ui.style.display = ui.style.display === 'none' ? 'block' : 'none';
 });
-
-
-
-document.getElementById('audio-file').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    await saveAudioFile(file);
-    loadAudioFromFile(file);
-
-    console.log('Saved audio file:', file.name);
-
-    const allFiles = await loadAllAudioFiles();
-    console.log("All saved sounds:");
-    allFiles.forEach(f => console.log(f.name));
-});
-
-document.getElementById('bg-spin').addEventListener('change', (e) => {
-    RotateBackground = e.target.checked;
+document.getElementById('hide-controlls').addEventListener('click', () => {
+    const ui = document.getElementById('controlls');
+    ui.style.display = ui.style.display === 'none' ? 'block' : 'none';
 });
 
 document.getElementById('audio-volume').addEventListener('input', (e) => {
     Volume = parseFloat(e.target.value);
 });
 
-document.getElementById('model-rotation-speed').addEventListener('input', (e) => {
-    modelRotationSpeed = parseFloat(e.target.value);
+document.getElementById('add-layer').addEventListener('click', async () => {
+    const name = prompt('Enter layer name:');
+    if (!name) return;
+    const layer = new Layer(name, false);
+    builder.addLayer(layer);
+    addLayerElement(layer);
+    refreshCounters();
+    await saveLayersToDB();
 });
 
-document.getElementById('noise-scale').addEventListener('change', (e) => {
-    NoiseScale = e.target.value;
+document.getElementById('audio-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    await saveAudioFile(file);
+
+    const songName = await readID3Title({ file });
+    const lI = document.createElement('div');
+    const button = document.createElement('button');
+    button.textContent = songName || file.name;
+    button.classList.add('list-button');
+    button.onclick = () => loadAudioFromRecord({ file, name: songName || file.name });
+    lI.appendChild(button);
+    document.getElementById('saved-tracks').appendChild(lI);
+
+    loadAudioFromRecord({ file, name: songName || file.name });
 });
 
-document.getElementById('noise-amount').addEventListener('change', (e) => {
-    NoiseAmount = e.target.value;
-});
-
-document.getElementById('object-scale').addEventListener('change', (e) => {
-    objectScale = e.target.value;
-});
-
-document.getElementById('color-change').addEventListener('change', (e) => {
-    ColorChange = e.target.checked;
-});
-
-document.getElementById('change-material').addEventListener('change', (e) => {
-    changeMaterial = e.target.checked;
-});
-
-document.getElementById('model-spin').addEventListener('change', (e) => {
-    rotateModel = e.target.checked;
-});
-
-document.getElementById('change-material-threshold').addEventListener('change', (e) => {
-    changeMaterialThreshold = e.target.value;
-});
-
-document.getElementById('bg-light').addEventListener('input', (e) => {
-    pointLight.intensity = parseFloat(e.target.value);
-    lightIntensity = parseFloat(e.target.value);
-});
-
-document.getElementById('bloom-strength').addEventListener('input', (e) => {
-    bloomStrength = parseFloat(e.target.value); 
-    composer.passes.forEach(pass => {
-        if (pass instanceof UnrealBloomPass) {
-            pass.strength = bloomStrength;
-        }
-    });
-});
-
-document.getElementById('bloom-radius').addEventListener('input', (e) => {
-    bloomRadius = parseFloat(e.target.value); 
-    composer.passes.forEach(pass => {
-        if (pass instanceof UnrealBloomPass) {
-            pass.radius = bloomRadius;
-        }
-    });
-});
-
-document.getElementById('bloom-threshold').addEventListener('input', (e) => {
-    bloomThreshold = parseFloat(e.target.value);
-    composer.passes.forEach(pass => {
-        if (pass instanceof UnrealBloomPass) {
-            pass.threshold = bloomThreshold;
-        }
-    });
-});
-
-document.getElementById('background-select').addEventListener('change', (e) => {
-    const selected = e.target.value;
-    if (selected === 'Texture') {
-    }
-    else if (selected === 'Tube') {
-        loadModel('tube', (tube) => {
-            tube.traverse(child => {
-                if (child.isMesh) child.material = wireframeMaterial;
-            });
-            scene.remove(group);
-        }, true);
-    }
-    else if (selected === 'Color') {
-    }
-    else{
-
-    }
-});
-
-document.getElementById('bg-color').addEventListener('input', (e) => {
-    bgMaterial.color.set(e.target.value);
-    bgMaterialNoGradient.color.set(e.target.value);
-    pointLight.color.set(e.target.value);
-});
-
-document.getElementById('bg-gradient').addEventListener('change', (e) => {
-    const materialToUse = e.target.checked ? bgMaterial : bgMaterialNoGradient;
-
-    group.traverse(child => {
-        if (child.material) {
-            if (Array.isArray(child.material)) {
-                child.material = child.material.map(() => materialToUse);
-            } else {
-                child.material = materialToUse;
-            }
-
-            child.material.needsUpdate = true;
-        }
-    });
-});
-
-document.getElementById('model-material').addEventListener('change', (e) => {
-    currentMaterial = e.target.value;
-    applyMaterialToCurrentModel();
-    updateStandardControlsVisibility();
-});
-
-document.getElementById('model-color').addEventListener('input', (e) => {
-    standardMaterial.color.set(e.target.value);
-});
-document.getElementById('wire-color').addEventListener('input', (e) => {
-    wireframeMaterial.color.set(e.target.value);
-});
-
-document.getElementById('model-roughness')?.addEventListener('input', (e) => {
-    standardMaterial.roughness = parseFloat(e.target.value);
-});
-
-document.getElementById('model-metalness')?.addEventListener('input', (e) => {
-    standardMaterial.metalness = parseFloat(e.target.value);
-});
-
-// --- Seek / progress ---
-
-function playAudioFromTime(offsetTime) {
-    console.log('Seeking to:', offsetTime, 'seconds');
-    sound.stop();
-    isPlaying = false;
-    audioContext = listener.context;
-
-    if (audioSource) {
-        try { audioSource.stop(); } catch(e) {}
+// ─────────────────────────────────────────────
+//  Boot
+// ─────────────────────────────────────────────
+window.addEventListener('load', async () => {
+    const allFiles = await loadAllAudioFiles();
+    for (const f of allFiles) {
+        const songName = await readID3Title(f);
+        const lI = document.createElement('div');
+        const button = document.createElement('button');
+        button.textContent = songName || f.name;
+        button.classList.add('list-button');
+        button.onclick = () => loadAudioFromRecord(f);
+        lI.appendChild(button);
+        document.getElementById('saved-tracks').appendChild(lI);
     }
 
-    audioSource = audioContext.createBufferSource();
-    audioSource.buffer = audioBuffer;
-    audioSource.loop = false;
-    audioSource.connect(analyser.analyser);
-    analyser.analyser.connect(listener.getInput());
-
-    startTime = audioContext.currentTime - offsetTime;
-    pauseTime = offsetTime;
-    isPlaying = true;
-    audioSource.start(0, offsetTime);
-}
-
-
-function updateProgressBar() {
-    if (!isDragging && audioBuffer && audioContext) {
-        let currentTime;
-        if (isPlaying && !audioSource) {
-            currentTime = audioContext.currentTime - startTime;
-        } else if (isPlaying && audioSource) {
-            currentTime = audioContext.currentTime - startTime + pauseTime;
-        }
-        if (currentTime !== undefined) {
-            const duration = audioBuffer.duration;
-            if (currentTime >= duration) {
-                isPlaying = false;
-                progressFill.style.width = '100%';
-                currentTimeDisplay.textContent = formatTime(duration);
-            } else {
-                progressFill.style.width = (currentTime / duration) * 100 + '%';
-                currentTimeDisplay.textContent = formatTime(currentTime);
-            }
-        }
+    const savedLayers = await loadLayersFromDB();
+    if (savedLayers && savedLayers.length > 0) {
+        await builder.loadFromJSON(savedLayers);
+    } else {
+        builder.addLayer(new Layer('Background', true));
     }
-}
+    renderLayerList();
 
-progressBar.addEventListener('mousedown', () => {
-    isDragging = true;
-    if (audioSource) { audioSource.stop(); isPlaying = false; }
+    if (builder.layers.length > 0) selectLayer(builder.layers[0]);
+    if (allFiles.length > 0) loadAudioFromRecord(allFiles[0]);
 });
 
-document.addEventListener('mouseup', () => { isDragging = false; });
-
-progressBar.addEventListener('click', (e) => {
-    if (!audioBuffer) return;
-    const rect = progressBar.getBoundingClientRect();
-    const clickX = e.clientX / 2 - rect.left;
-    const percent = (clickX / rect.width * 100).toFixed(2);
-    playAudioFromTime((percent / 100) * audioBuffer.duration);
-});
-
-// --- Animation ---
-function animate( time ) {
-    const data = analyser.getAverageFrequency();
+// ─────────────────────────────────────────────
+//  Animation loop
+// ─────────────────────────────────────────────
+function animate(time) {
+    builder.updateAudioData(analyser, Volume);
     updateProgressBar();
-
-    if ( loadedModels[modelName] ) {
-        const scale = (0.001 + data / 10000) * objectScale;
-        loadedModels[modelName].scale.set( scale, scale, scale );
-
-        const simplex = animate.simplex || (animate.simplex = new SimplexNoise());
-
-        loadedModels[modelName].traverse( child => {
-            if ( child.isMesh && child.geometry && loadedModels[modelName].originalPositions[child.uuid] ) {
-                const positions = child.geometry.attributes.position;
-                const originalPositions = loadedModels[modelName].originalPositions[child.uuid];
-
-                for (let i = 0; i < originalPositions.length; i += 3) {
-                    const x = originalPositions[i];
-                    const y = originalPositions[i + 1];
-                    const z = originalPositions[i + 2];
-
-                    const noise = simplex.noise3d(
-                        x * NoiseScale + time * 0.0006,
-                        y * NoiseScale + data * 0.01,
-                        z * NoiseScale + loadedModels[modelName].rotation.y
-                    );
-
-                    const length = Math.sqrt(x * x + y * y + z * z) || 1;
-                    const displacement = noise * data * 0.001 * NoiseAmount;
-                    positions.array[i]     = x + (x / length) * displacement;
-                    positions.array[i + 1] = y + (y / length) * displacement;
-                    positions.array[i + 2] = z + (z / length) * displacement;
-                }
-                positions.needsUpdate = true;
-                child.geometry.computeVertexNormals();
-            }
-        });
-    }
-
-    // changeMaterial toggle overrides selected material with freq-reactive swap
-    if ( loadedModels[modelName] && changeMaterial ) {
-        const mat = loadedModels[modelName].scale.x > changeMaterialThreshold ? wireframeMaterial : normalMaterial;
-        loadedModels[modelName].traverse( child => { if ( child.isMesh ) child.material = mat; });
-    }
-    pointLight.intensity = (data / 10) *lightIntensity;
-    const hue = ( data / 100 ) % 1;
-    if (ColorChange) {
-        wireframeMaterial.color.setHSL( hue * 0.5, 1, 0.5 );
-        standardMaterial.color.setHSL( hue, 1, 0.5 );
-        bgMaterial.color.setHSL( hue + (time / 10000), 1, 0.1 );
-        bgMaterialNoGradient.color.setHSL( hue + (time / 10000), 1, 0.1 );
-    }
-
-    if ( loadedModels[modelName] && rotateModel) {
-        loadedModels[modelName].rotation.y = time / 1000 * modelRotationSpeed;
-    }
-
-    group.rotation.z = RotateBackground ? (time / 2000) + (Math.round(data) / 500) : 0;
-
-    composer.render();
     sound.setVolume(Volume);
+    builder.update(time);
 }
 
-renderer.setAnimationLoop(animate);
+builder.renderer.setAnimationLoop(animate);
