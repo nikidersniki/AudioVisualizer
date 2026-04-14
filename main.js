@@ -282,7 +282,6 @@ progressBar.addEventListener('click', (e) => {
 // ─────────────────────────────────────────────
 //  Layer UI
 // ─────────────────────────────────────────────
-let selectedLayer = null;
 let selectedObject = null;
 
 function refreshCounters() {
@@ -370,7 +369,6 @@ function addLayerElement(layer) {
 }
 
 function selectLayer(layer) {
-    selectedLayer = layer;
     selectedObject = null;
 
     document.querySelectorAll('.layer-item').forEach(el => {
@@ -412,11 +410,14 @@ function selectLayer(layer) {
         buttonBox.appendChild(addModel);
     }
 
-    // Lights and waves available on all layers including background
-    const addLight = document.createElement('div');
-    addLight.classList.add('Btn');
-    addLight.textContent = 'Add Light';
-    addLight.addEventListener('click', () => onAddLight(layer));
+    // Lights only on non-base layers
+    if (!layer.isBase) {
+        const addLight = document.createElement('div');
+        addLight.classList.add('Btn');
+        addLight.textContent = 'Add Light';
+        addLight.addEventListener('click', () => onAddLight(layer));
+        buttonBox.appendChild(addLight);
+    }
 
     const addWave = document.createElement('div');
     addWave.classList.add('Btn');
@@ -432,7 +433,6 @@ function selectLayer(layer) {
         .catch(() => {});
     });
 
-    buttonBox.appendChild(addLight);
     buttonBox.appendChild(addWave);
 
     renderObjectList(layer);
@@ -457,6 +457,13 @@ function renderObjectList(layer) {
         const label = document.createElement('span');
         label.textContent = obj.name;
 
+        const dupBtn = document.createElement('div');
+        dupBtn.classList.add('duplicate-object', 'image-button');
+        dupBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            await duplicateObject(obj, layer);
+        });
+
         const removeBtn = document.createElement('div');
         removeBtn.classList.add('remove-layer', 'image-button');
         removeBtn.addEventListener('click', (e) => {
@@ -470,8 +477,13 @@ function renderObjectList(layer) {
             saveLayersToDB();
         });
 
+        const btnGroup = document.createElement('div');
+        btnGroup.className = 'obj-btn-group';
+        btnGroup.appendChild(dupBtn);
+        btnGroup.appendChild(removeBtn);
+
         row.appendChild(label);
-        row.appendChild(removeBtn);
+        row.appendChild(btnGroup);
         listEl.appendChild(row);
     }
 }
@@ -502,15 +514,41 @@ function renderObjectProperties(obj, layer) {
 
     const save = () => saveLayersToDB();
 
-    // Helper: section header
+    let currentSection = null; // content div of the active section
+
+    // Helper: collapsible section header
     function section(title) {
         const h = document.createElement('div');
-        h.className = 'h2 prop-section-title';
-        h.textContent = title;
+        h.className = 'h2 prop-section-title prop-section-collapsible';
+
+        const titleSpan = document.createElement('span');
+        titleSpan.textContent = title;
+
+        const arrow = document.createElement('span');
+        arrow.className = 'prop-section-arrow';
+        arrow.textContent = '▾';
+
+        h.appendChild(titleSpan);
+        h.appendChild(arrow);
         panel.appendChild(h);
+
+        const content = document.createElement('div');
+        content.className = 'prop-section-content';
+        content.style.display = 'none';        // collapsed by default
+        panel.appendChild(content);
+
+        arrow.style.transform = 'rotate(-90deg)'; // start pointing right (collapsed)
+
+        h.addEventListener('click', () => {
+            const collapsed = content.style.display === 'none';
+            content.style.display = collapsed ? '' : 'none';
+            arrow.style.transform = collapsed ? '' : 'rotate(-90deg)';
+        });
+
+        currentSection = content;
     }
 
-    // Helper: row wrapper
+    // Helper: row wrapper — appends to active section, or panel if none
     function row(label) {
         const wrap = document.createElement('div');
         wrap.className = 'prop-row';
@@ -518,7 +556,7 @@ function renderObjectProperties(obj, layer) {
         lbl.className = 'prop-label';
         lbl.textContent = label;
         wrap.appendChild(lbl);
-        panel.appendChild(wrap);
+        (currentSection || panel).appendChild(wrap);
         return wrap;
     }
 
@@ -607,13 +645,14 @@ function renderObjectProperties(obj, layer) {
         wrap.appendChild(inp);
         wrap.appendChild(num);
         r.appendChild(wrap);
+        return r;
     }
 
     // PropertyBinding sub-panel
     function bindingPanel(label, binding, range = { min: -10, max: 10 }) {
         const container = document.createElement('div');
         container.className = 'prop-binding';
-        panel.appendChild(container);
+        (currentSection || panel).appendChild(container);
 
         const head = document.createElement('div');
         head.className = 'prop-binding-title h2';
@@ -770,6 +809,8 @@ function renderObjectProperties(obj, layer) {
         maxWrap.appendChild(maxSlider); maxWrap.appendChild(maxNum);
         maxRow.appendChild(maxLbl); maxRow.appendChild(maxWrap);
         audioSection.appendChild(maxRow);
+
+        return container;
     }
 
     // ── Common: Name + Visible ──────────────────
@@ -802,15 +843,23 @@ function renderObjectProperties(obj, layer) {
 
         section('Material Properties');
 
+        let opacityRowRef    = null; // forward refs set after their rows are created
+        let roughnessRowRef  = null;
+        let metalnessRowRef  = null;
+        let smoothRowRef     = null;
+
+        const isStandard = () => obj.materialType === 'standard';
+        const isNormal   = () => obj.materialType === 'normal';
+
         selectInput('Material', ['normal','wireframe','standard'],
             () => obj.materialType,
             v => {
                 obj.materialType = v;
-                if (obj.threeObject) {
-                    obj.threeObject.traverse(child => {
-                        if (child.isMesh) child.material = PRESETS.materials[v] ?? PRESETS.materials.normal;
-                    });
-                }
+                // _updateModel handles the actual material swap via _ownMaterialType check
+                if (opacityRowRef)   opacityRowRef.style.display   = v === 'normal'   ? 'none' : '';
+                if (roughnessRowRef) roughnessRowRef.style.display = v === 'standard' ? '' : 'none';
+                if (metalnessRowRef) metalnessRowRef.style.display = v === 'standard' ? '' : 'none';
+                if (smoothRowRef)    smoothRowRef.style.display    = v === 'normal'   ? 'none' : '';
             }
         );
 
@@ -856,10 +905,27 @@ function renderObjectProperties(obj, layer) {
             save();
         });
         crRow.appendChild(crInp);
-        panel.appendChild(sensitivityRow);
+        (currentSection || panel).appendChild(sensitivityRow);
 
-        bindingPanel('Roughness', obj.roughness, { min: 0, max: 1 });
-        bindingPanel('Metalness', obj.metalness, { min: 0, max: 1 });
+        roughnessRowRef = bindingPanel('Roughness', obj.roughness, { min: 0, max: 1 });
+        roughnessRowRef.style.display = isStandard() ? '' : 'none';
+
+        metalnessRowRef = bindingPanel('Metalness', obj.metalness, { min: 0, max: 1 });
+        metalnessRowRef.style.display = isStandard() ? '' : 'none';
+
+        smoothRowRef = row('Smooth Shading');
+        const smoothInp = document.createElement('input');
+        smoothInp.type = 'checkbox'; smoothInp.className = 'prop-checkbox';
+        smoothInp.checked = obj.smoothShading ?? true;
+        smoothInp.addEventListener('change', () => { obj.smoothShading = smoothInp.checked; save(); });
+        smoothRowRef.appendChild(smoothInp);
+        smoothRowRef.style.display = isNormal() ? 'none' : '';
+
+        opacityRowRef = slider('Opacity', 0, 1, 0.01,
+            () => obj.opacity ?? 1,
+            v => { obj.opacity = v; }
+        );
+        opacityRowRef.style.display = isNormal() ? 'none' : '';
 
         section('Audio Scale');
         bindingPanel('Audio Scale', obj.audioScale);
@@ -909,6 +975,53 @@ function renderObjectProperties(obj, layer) {
         });
         segRow.appendChild(segNum);
 
+        // Color reactive toggle + sensitivity (shown only when reactive)
+        const sensitivityRow = document.createElement('div');
+        sensitivityRow.style.display = obj.colorReactive ? '' : 'none';
+        const srWrap = document.createElement('div');
+        srWrap.className = 'prop-row';
+        const srLbl = document.createElement('label');
+        srLbl.className = 'prop-label';
+        srLbl.textContent = 'Color Sensitivity';
+        const srSliderWrap = document.createElement('div');
+        srSliderWrap.className = 'prop-slider-wrap';
+        const srSlider = document.createElement('input');
+        srSlider.type = 'range'; srSlider.className = 'prop-slider';
+        srSlider.min = 0; srSlider.max = 2; srSlider.step = 0.01;
+        srSlider.value = obj.colorSensitivity ?? 0.5;
+        const srNum = document.createElement('input');
+        srNum.type = 'number'; srNum.className = 'prop-number';
+        srNum.min = 0; srNum.max = 2; srNum.step = 0.01;
+        srNum.value = obj.colorSensitivity ?? 0.5;
+        srSlider.addEventListener('input', () => {
+            obj.colorSensitivity = parseFloat(srSlider.value);
+            srNum.value = obj.colorSensitivity; save();
+        });
+        srNum.addEventListener('input', () => {
+            obj.colorSensitivity = parseFloat(srNum.value);
+            srSlider.value = obj.colorSensitivity; save();
+        });
+        srSliderWrap.appendChild(srSlider); srSliderWrap.appendChild(srNum);
+        srWrap.appendChild(srLbl); srWrap.appendChild(srSliderWrap);
+        sensitivityRow.appendChild(srWrap);
+
+        const crRow = row('Color Reactive');
+        const crInp = document.createElement('input');
+        crInp.type = 'checkbox'; crInp.className = 'prop-checkbox';
+        crInp.checked = obj.colorReactive;
+        crInp.addEventListener('change', () => {
+            obj.colorReactive = crInp.checked;
+            sensitivityRow.style.display = obj.colorReactive ? '' : 'none';
+            save();
+        });
+        crRow.appendChild(crInp);
+        (currentSection || panel).appendChild(sensitivityRow);
+
+        slider('Opacity', 0, 1, 0.01,
+            () => obj.opacity ?? 0.5,
+            v => { obj.opacity = v; }
+        );
+
         section('Amplitude');
         bindingPanel('Amplitude', obj.amplitude);
 
@@ -921,6 +1034,25 @@ function renderObjectProperties(obj, layer) {
         bindingPanel('Width', obj.width, { min: 1, max: 50 });
         bindingPanel('Radius (circular)', obj.radius);
     }
+}
+
+// ─────────────────────────────────────────────
+//  Duplicate object
+// ─────────────────────────────────────────────
+async function duplicateObject(obj, layer) {
+    const data = { ...obj.toJSON(), id: crypto.randomUUID(), name: obj.name + ' copy' };
+    if (obj.type === 'model') {
+        const newObj = ModelObject.fromJSON(data);
+        await builder.addModelToLayer(layer.id, newObj);
+    } else if (obj.type === 'pointLight') {
+        const newObj = PointLightObject.fromJSON(data);
+        builder.addLightToLayer(layer.id, newObj);
+    } else if (obj.type === 'wave') {
+        const newObj = WaveObject.fromJSON(data);
+        builder.addWaveToLayer(layer.id, newObj);
+    }
+    renderObjectList(layer);
+    saveLayersToDB();
 }
 
 // ─────────────────────────────────────────────

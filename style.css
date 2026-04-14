@@ -15,8 +15,8 @@
     --accent-dim:    rgba(200, 240, 53, 0.15);
     --accent-glow:   rgba(200, 240, 53, 0.06);
     --text:          rgba(255, 255, 255, 0.88);
-    --text-dim:      rgba(255, 255, 255, 0.45);
-    --text-faint:    rgba(255, 255, 255, 0.22);
+    --text-dim:      rgba(255, 255, 255, 0.534);
+    --text-faint:    rgba(255, 255, 255, 0.76);
     --font-mono:     'Space Mono', 'Courier New', monospace;
     --font-display:  'VT323', monospace;
     --radius:        2px;
@@ -350,6 +350,29 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
     gap: 2px;
 }
 
+.layer-opacity-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 4px 4px;
+    width: 100%;
+}
+.layer-opacity-label {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    white-space: nowrap;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+.layer-opacity-slider {
+    flex: 1;
+    accent-color: var(--accent);
+    cursor: pointer;
+    height: 2px;
+}
+
 #current-layer-controls {
     padding: 6px 0;
     border-top: 1px solid var(--border);
@@ -387,7 +410,14 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
 #add-layer    { background-image: url('Graphics/plus-svgrepo-com.svg'); }
 .move-up      { background-image: url('Graphics/arrowup-svgrepo-com.svg'); }
 .move-down    { background-image: url('Graphics/arrowdown-svgrepo-com.svg'); }
-.remove-layer { background-image: url('Graphics/minus-svgrepo-com.svg'); }
+.remove-layer     { background-image: url('Graphics/minus-svgrepo-com.svg'); }
+.duplicate-object { background-image: url('Graphics/duplicate-svgrepo-com.svg'); }
+
+.obj-btn-group {
+    display: flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
 
 /* ════════════════════════════════════════════════════════════════
    BUTTONS
@@ -565,6 +595,25 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
     text-transform: uppercase;
     letter-spacing: 0.12em;
     color: var(--accent);
+}
+
+.prop-section-collapsible {
+    cursor: pointer;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    user-select: none;
+    transition: background 0.12s;
+}
+.prop-section-collapsible:hover {
+    background: rgba(200, 240, 53, 0.1);
+}
+.prop-section-arrow {
+    display: inline-block;
+    font-size: 0.75rem;
+    opacity: 0.7;
+    transition: transform 0.15s;
+    line-height: 1;
 }
 
 .prop-row {

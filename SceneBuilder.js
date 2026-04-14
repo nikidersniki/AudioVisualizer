@@ -3,6 +3,8 @@ import {
     MeshNormalMaterial, MeshBasicMaterial, MeshStandardMaterial,
     PointLight, DynamicDrawUsage, TextureLoader,
     EquirectangularReflectionMapping,
+    WebGLRenderTarget, OrthographicCamera, Mesh, PlaneGeometry,
+    CustomBlending, OneFactor, OneMinusSrcAlphaFactor,
 } from './modules/three.js/build/three.module.js';
 
 import { LineSegments2 }        from './modules/three.js/examples/jsm/lines/LineSegments2.js';
@@ -13,6 +15,7 @@ import { FBXLoader }     from './modules/three.js/examples/jsm/loaders/FBXLoader
 import { OBJLoader }     from './modules/three.js/examples/jsm/loaders/OBJLoader.js';
 import { SimplexNoise }  from './modules/three.js/examples/jsm/math/SimplexNoise.js';
 import { EXRLoader }     from './modules/three.js/examples/jsm/loaders/EXRLoader.js';
+import { mergeVertices } from './modules/three.js/examples/jsm/utils/BufferGeometryUtils.js';
 
 import { Layer, ModelObject, PointLightObject, WaveObject } from './Sceneobjects.js';
 
@@ -56,6 +59,7 @@ export class SceneBuilder {
             this.camera.aspect = this.width / this.height;
             this.camera.updateProjectionMatrix();
             this.renderer.setSize(this.width, this.height);
+            this._layerTargets.forEach(t => t.setSize(this.width, this.height));
         });
 
         new EXRLoader().load('./Graphics/pond_bridge_night_1k.exr', (tex) => {
@@ -69,8 +73,27 @@ export class SceneBuilder {
         this._simplex    = new SimplexNoise();
 
         // ── Layer list & per-layer scenes ─────────────
-        this.layers      = [];               // Layer[]
-        this._layerScenes = new Map();       // layerId → Scene
+        this.layers       = [];               // Layer[]
+        this._layerScenes = new Map();        // layerId → Scene
+        this._layerTargets = new Map();       // layerId → WebGLRenderTarget
+
+        // ── Compositing (full-screen quad per layer) ──
+        this._compositeCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        this._compositeQuad   = new Mesh(
+            new PlaneGeometry(2, 2),
+            new MeshBasicMaterial({
+                transparent: true, depthWrite: false, depthTest: false,
+                // Render target stores premultiplied alpha from blending —
+                // use ONE src factor so we don't multiply alpha a second time.
+                blending:      CustomBlending,
+                blendSrc:      OneFactor,
+                blendDst:      OneMinusSrcAlphaFactor,
+                blendSrcAlpha: OneFactor,
+                blendDstAlpha: OneMinusSrcAlphaFactor,
+            })
+        );
+        this._compositeScene  = new Scene();
+        this._compositeScene.add(this._compositeQuad);
 
         // ── Audio data (updated externally each frame) ─
         this.audioData = {
@@ -89,6 +112,7 @@ export class SceneBuilder {
     addLayer(layer) {
         this.layers.push(layer);
         this._layerScenes.set(layer.id, new Scene());
+        this._layerTargets.set(layer.id, new WebGLRenderTarget(this.width, this.height));
         return layer;
     }
 
@@ -100,6 +124,8 @@ export class SceneBuilder {
             if (obj.threeObject && scene) scene.remove(obj.threeObject);
         });
         this._layerScenes.delete(id);
+        this._layerTargets.get(id)?.dispose();
+        this._layerTargets.delete(id);
         this.layers = this.layers.filter(l => l.id !== id);
     }
 
@@ -167,8 +193,10 @@ export class SceneBuilder {
         geo.setPositions(arr);
 
         const mat = new LineMaterial({
-            color:     waveObj.color,
-            linewidth: waveObj.lineWidth ?? 1,
+            color:       waveObj.color,
+            opacity:     waveObj.opacity,
+            transparent: true,
+            linewidth:   waveObj.lineWidth ?? 1,
         });
         mat.resolution.set(this.renderer.domElement.width, this.renderer.domElement.height);
 
@@ -208,6 +236,11 @@ export class SceneBuilder {
 
         waveObj.applyBindings(ad);
         three.material.color.set(waveObj.color);
+        if (waveObj.colorReactive) {
+            const hue = (ad.avgFrequency / 255) * (waveObj.colorSensitivity ?? 0.5);
+            three.material.color.setHSL(hue, 1, 0.5);
+        }
+        three.material.opacity = waveObj.opacity;
         const lineWidthValue = waveObj.width?.resolve ? 
                        waveObj.width.resolve(ad) : 
                        (waveObj.width ?? 4);
@@ -336,12 +369,18 @@ export class SceneBuilder {
         object.scale.set(...entry.scale);
         object.originalPositions = {};
 
-        const mat = PRESETS.materials[modelObj.materialType] ?? this.materials.normal;
+        // Each model gets its own material instance so per-model opacity is independent.
+        const mat = this._cloneMaterialForType(modelObj.materialType);
+        object._ownMaterial     = mat;
+        object._ownMaterialType = modelObj.materialType;
+
         object.traverse(child => {
             if (!child.isMesh) return;
             child.material = mat;
             if (child.geometry) {
-                child.geometry = child.geometry.clone();
+                // mergeVertices welds coincident vertices into an indexed geometry,
+                // so computeVertexNormals() averages across shared verts → smooth shading.
+                child.geometry = mergeVertices(child.geometry.clone());
                 child.geometry.computeVertexNormals();
                 if (child.geometry.attributes.position) {
                     child.geometry.attributes.position.setUsage(DynamicDrawUsage);
@@ -350,6 +389,18 @@ export class SceneBuilder {
                 }
             }
         });
+    }
+
+    _cloneMaterialForType(type) {
+        if (type === 'wireframe') {
+            return new MeshBasicMaterial({ wireframe: true, color: 0xffffff });
+        }
+        if (type === 'standard') {
+            const m = new MeshStandardMaterial({ color: 0x888888, roughness: 1, metalness: 0 });
+            m.envMap = PRESETS.materials.standard.envMap ?? null;
+            return m;
+        }
+        return PRESETS.materials.normal; // normal is shared — no per-model props needed
     }
 
     // ─────────────────────────────────────────
@@ -366,16 +417,33 @@ export class SceneBuilder {
             }
         }
 
-        // Render each layer in order — clear depth between layers so higher
-        // layers always paint on top regardless of 3-D position
+        // Render each layer into its own render target (transparent background),
+        // then composite onto the screen with the layer's opacity for true blending.
+        this.renderer.setRenderTarget(null);
+        this.renderer.setClearColor(0x000000, 1);
         this.renderer.clear();
+
         for (const layer of this.layers) {
             if (!layer.visible) continue;
-            const scene = this._layerScenes.get(layer.id);
-            if (!scene) continue;
-            this.renderer.clearDepth();
+            const scene  = this._layerScenes.get(layer.id);
+            const target = this._layerTargets.get(layer.id);
+            if (!scene || !target) continue;
+
+            // Render layer scene to its render target with a transparent clear
+            this.renderer.setRenderTarget(target);
+            this.renderer.setClearColor(0x000000, 0);
+            this.renderer.clear();
             this.renderer.render(scene, this.camera);
+
+            // Composite onto the main framebuffer
+            this.renderer.setRenderTarget(null);
+            this._compositeQuad.material.map     = target.texture;
+            this._compositeQuad.material.opacity = layer.opacity ?? 1;
+            this._compositeQuad.material.needsUpdate = true;
+            this.renderer.render(this._compositeScene, this._compositeCamera);
         }
+
+        this.renderer.setClearColor(0x000000, 1);
     }
 
     _updateModel(modelObj, time) {
@@ -418,9 +486,22 @@ export class SceneBuilder {
             child.geometry.computeVertexNormals();
         });
 
+        // ── Material type switch ──────────────────────
+        if (three._ownMaterialType !== modelObj.materialType) {
+            const newMat = this._cloneMaterialForType(modelObj.materialType);
+            three._ownMaterial     = newMat;
+            three._ownMaterialType = modelObj.materialType;
+            three.traverse(child => { if (child.isMesh) child.material = newMat; });
+        }
+
         // ── Material properties ───────────────────────
         if (modelObj.materialType === 'standard') {
-            const mat = PRESETS.materials.standard;
+            const mat = three._ownMaterial;
+            // Keep envMap in sync (EXR may finish loading after model)
+            if (mat.envMap !== PRESETS.materials.standard.envMap) {
+                mat.envMap = PRESETS.materials.standard.envMap ?? null;
+                mat.needsUpdate = true;
+            }
             mat.roughness = Math.max(0, Math.min(1, modelObj.roughness.resolve(ad)));
             mat.metalness = Math.max(0, Math.min(1, modelObj.metalness.resolve(ad)));
             mat.color.set(modelObj.color);
@@ -428,13 +509,27 @@ export class SceneBuilder {
                 const hue = (ad.avgFrequency / 255) * (modelObj.colorSensitivity ?? 0.5);
                 mat.color.setHSL(hue, 1, 0.5);
             }
+            const opacity = modelObj.opacity ?? 1;
+            const wasTransparent = mat.transparent;
+            const wasFlatShading = mat.flatShading;
+            mat.opacity     = opacity;
+            mat.transparent = opacity < 1;
+            mat.depthWrite  = opacity >= 1;
+            mat.flatShading = !(modelObj.smoothShading ?? true);
+            if (mat.transparent !== wasTransparent || mat.flatShading !== wasFlatShading) mat.needsUpdate = true;
         } else if (modelObj.materialType === 'wireframe') {
-            const mat = PRESETS.materials.wireframe;
+            const mat = three._ownMaterial;
             mat.color.set(modelObj.color);
             if (modelObj.colorReactive) {
                 const hue = (ad.avgFrequency / 255) * (modelObj.colorSensitivity ?? 0.5);
                 mat.color.setHSL(hue, 1, 0.5);
             }
+            const opacity = modelObj.opacity ?? 1;
+            const wasTransparent = mat.transparent;
+            mat.opacity     = opacity;
+            mat.transparent = opacity < 1;
+            mat.depthWrite  = opacity >= 1;
+            if (mat.transparent !== wasTransparent) mat.needsUpdate = true;
         }
     }
 
@@ -476,8 +571,10 @@ export class SceneBuilder {
         this.layers.forEach(l => {
             const scene = this._layerScenes.get(l.id);
             l.objects.forEach(o => { if (o.threeObject && scene) scene.remove(o.threeObject); });
+            this._layerTargets.get(l.id)?.dispose();
         });
         this._layerScenes.clear();
+        this._layerTargets.clear();
         this.layers = [];
 
         const promises = [];
@@ -486,6 +583,7 @@ export class SceneBuilder {
             this.layers.push(layer);
             const scene = new Scene();
             this._layerScenes.set(layer.id, scene);
+            this._layerTargets.set(layer.id, new WebGLRenderTarget(this.width, this.height));
             for (const obj of layer.objects) {
                 if (obj.type === 'model') {
                     promises.push(this._loadMesh(obj, scene));

@@ -128,6 +128,8 @@ export class ModelObject extends SceneObject {
         // Rotation speed (can be audio-driven)
         this.spinSpeed    = new PropertyBinding(0);
 
+        this.opacity          = 1;
+        this.smoothShading    = true;
         this.colorReactive   = false;
         this.colorSensitivity = 0.5;
     }
@@ -215,6 +217,9 @@ export class WaveObject extends SceneObject {
         this.width       = new PropertyBinding(2);   // linear / bars / line: horizontal span
         this.sampleCount = 512;                      // how many freq bins to read (1–analyser max)
         this.lineWidth   = 5;                        // screen-space line width in pixels
+        this.opacity     = 0.5;
+        this.colorReactive   = false;
+        this.colorSensitivity = 0.5;
     }
 
     toJSON() { return this._bindingsToJSON(); }
@@ -235,6 +240,7 @@ export class Layer {
         this.name    = name;
         this.isBase  = isBase;
         this.visible = true;
+        this.opacity = 1;
         this.objects = [];  // SceneObject[]
     }
 
@@ -248,6 +254,7 @@ export class Layer {
             name:    this.name,
             isBase:  this.isBase,
             visible: this.visible,
+            opacity: this.opacity,
             objects: this.objects.map(o => o.toJSON())
         };
     }
@@ -256,6 +263,7 @@ export class Layer {
         const layer = new Layer(data.name, data.isBase);
         layer.id      = data.id;
         layer.visible = data.visible ?? true;
+        layer.opacity = data.opacity ?? 1;
         layer.objects = (data.objects || []).map(o => {
             if (o.type === 'model')      return ModelObject.fromJSON(o);
             if (o.type === 'pointLight') return PointLightObject.fromJSON(o);
