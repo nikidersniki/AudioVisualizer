@@ -2,15 +2,19 @@ import {
     Scene, PerspectiveCamera, WebGLRenderer,
     MeshNormalMaterial, MeshBasicMaterial, MeshStandardMaterial,
     PointLight, DynamicDrawUsage, TextureLoader,
-    EquirectangularReflectionMapping
+    EquirectangularReflectionMapping,
 } from './modules/three.js/build/three.module.js';
+
+import { LineSegments2 }        from './modules/three.js/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from './modules/three.js/examples/jsm/lines/LineSegmentsGeometry.js';
+import { LineMaterial }         from './modules/three.js/examples/jsm/lines/LineMaterial.js';
 
 import { FBXLoader }     from './modules/three.js/examples/jsm/loaders/FBXLoader.js';
 import { OBJLoader }     from './modules/three.js/examples/jsm/loaders/OBJLoader.js';
 import { SimplexNoise }  from './modules/three.js/examples/jsm/math/SimplexNoise.js';
 import { EXRLoader }     from './modules/three.js/examples/jsm/loaders/EXRLoader.js';
 
-import { Layer, ModelObject, PointLightObject } from './Sceneobjects.js';
+import { Layer, ModelObject, PointLightObject, WaveObject } from './Sceneobjects.js';
 
 // ─────────────────────────────────────────────
 //  Model catalogue  (add entries here to expand)
@@ -20,6 +24,8 @@ export class PRESETS{
         { name: 'duck',       path: './models/duck-plush/source/Duck.fbx', scale: [0.01, 0.01, 0.01] },
         { name: 'eco-sphere', path: './models/EcoSphrere.fbx',             scale: [0.01, 0.01, 0.01] },
         { name: 'monke',      path: './models/Monke.fbx',                  scale: [0.01, 0.01, 0.01] },
+        { name: 'tube',      path: './models/Tube.fbx',                  scale: [0.01, 0.01, 0.01] },
+        { name: 'MacNCheese',      path: './models/MacNCheese.fbx',                  scale: [0.01, 0.01, 0.01] },
     ];
         // ── Shared materials ───────────────────────────
     static materials = {
@@ -132,6 +138,165 @@ export class SceneBuilder {
     }
 
     // ─────────────────────────────────────────
+    //  Wave management
+    // ─────────────────────────────────────────
+    addWaveToLayer(layerId, waveObj) {
+        const layer = this.getLayer(layerId);
+        if (!layer) return;
+        layer.addObject(waveObj);
+        const three = this._createWaveThreeObject(waveObj);
+        waveObj.threeObject = three;
+        this._layerScenes.get(layerId)?.add(three);
+    }
+
+    // Number of line segments for each wave type
+    _waveSegCount(waveType, N) {
+        if (waveType === 'line')                                   return 1;
+        if (waveType === 'linear' || waveType === 'linear-up')     return Math.max(1, N - 1);
+        return N; // circular, bars, bars-both
+    }
+
+    _createWaveThreeObject(waveObj) {
+        const N        = waveObj.segments;
+        const segCount = this._waveSegCount(waveObj.waveType, N);
+        // Each segment = start(xyz) + end(xyz) = 6 floats.
+        // LineSegmentsGeometry uses a Float32Array directly — no copy made.
+        const arr = new Float32Array(segCount * 6);
+
+        const geo = new LineSegmentsGeometry();
+        geo.setPositions(arr);
+
+        const mat = new LineMaterial({
+            color:     waveObj.color,
+            linewidth: waveObj.lineWidth ?? 1,
+        });
+        mat.resolution.set(this.renderer.domElement.width, this.renderer.domElement.height);
+
+        const three = new LineSegments2(geo, mat);
+        three.frustumCulled = false; // bounding sphere would go stale each frame
+        three._waveType  = waveObj.waveType;
+        three._segCount  = segCount;
+        three._arr       = arr; // direct reference to the GPU buffer array
+        return three;
+    }
+
+    _updateWave(waveObj) {
+        let three = waveObj.threeObject;
+        if (!three) return;
+
+        const ad        = this.audioData;
+        const freqData  = ad.freqData ?? new Uint8Array(32);
+        const N         = waveObj.segments;
+        const segCount  = this._waveSegCount(waveObj.waveType, N);
+
+
+        // Rebuild if type or segment count changed
+        if (three._waveType !== waveObj.waveType || three._segCount !== segCount) {
+            for (const layer of this.layers) {
+                if (layer.getObject(waveObj.id)) {
+                    const scene = this._layerScenes.get(layer.id);
+                    scene?.remove(three);
+                    three.geometry.dispose();
+                    three.material.dispose();
+                    three = this._createWaveThreeObject(waveObj);
+                    waveObj.threeObject = three;
+                    scene?.add(three);
+                    break;
+                }
+            }
+        }
+
+        waveObj.applyBindings(ad);
+        three.material.color.set(waveObj.color);
+        const lineWidthValue = waveObj.width?.resolve ? 
+                       waveObj.width.resolve(ad) : 
+                       (waveObj.width ?? 4);
+        three.material.linewidth = lineWidthValue;
+
+        three.material.resolution.set(this.renderer.domElement.width, this.renderer.domElement.height);
+        
+        const amplitude   = waveObj.amplitude.resolve(ad);
+        const width       = waveObj.width.resolve(ad);
+        const radius      = waveObj.radius.resolve(ad);
+        const sampleCount = Math.max(1, Math.min(waveObj.sampleCount ?? freqData.length, freqData.length));
+        const arr         = three._arr;
+
+        // Map a point index (0..nPts-1) to a freq bin
+        const ptBin = (k, nPts) => {
+            const t = nPts > 1 ? k / (nPts - 1) : 0;
+            return Math.min(Math.floor(t * sampleCount), sampleCount - 1);
+        };
+
+        switch (waveObj.waveType) {
+            case 'circular':
+                // N segments closing the loop: seg i = (point[i] → point[(i+1)%N])
+                for (let i = 0; i < N; i++) {
+                    const j   = (i + 1) % N;
+                    const a0  = (i / N) * Math.PI * 2;
+                    const a1  = (j / N) * Math.PI * 2;
+                    const b0  = Math.min(Math.floor((i / N) * sampleCount), sampleCount - 1);
+                    const b1  = Math.min(Math.floor((j / N) * sampleCount), sampleCount - 1);
+                    const r0  = radius + (freqData[b0] / 255) * amplitude;
+                    const r1  = radius + (freqData[b1] / 255) * amplitude;
+                    arr[i*6]   = Math.cos(a0) * r0; arr[i*6+1] = Math.sin(a0) * r0; arr[i*6+2] = 0;
+                    arr[i*6+3] = Math.cos(a1) * r1; arr[i*6+4] = Math.sin(a1) * r1; arr[i*6+5] = 0;
+                }
+                break;
+
+            case 'linear':
+                // N-1 segments: seg i = (point[i] → point[i+1])
+                for (let i = 0; i < N - 1; i++) {
+                    const x0 = (i       / (N-1) - 0.5) * width;
+                    const x1 = ((i + 1) / (N-1) - 0.5) * width;
+                    const f0 = (freqData[ptBin(i,     N)] / 255 - 0.5) * 2;
+                    const f1 = (freqData[ptBin(i + 1, N)] / 255 - 0.5) * 2;
+                    arr[i*6]   = x0; arr[i*6+1] = f0 * amplitude; arr[i*6+2] = 0;
+                    arr[i*6+3] = x1; arr[i*6+4] = f1 * amplitude; arr[i*6+5] = 0;
+                }
+                break;
+
+            case 'linear-up':
+                for (let i = 0; i < N - 1; i++) {
+                    const x0 = (i       / (N-1) - 0.5) * width;
+                    const x1 = ((i + 1) / (N-1) - 0.5) * width;
+                    const h0 = (freqData[ptBin(i,     N)] / 255) * amplitude;
+                    const h1 = (freqData[ptBin(i + 1, N)] / 255) * amplitude;
+                    arr[i*6]   = x0; arr[i*6+1] = h0; arr[i*6+2] = 0;
+                    arr[i*6+3] = x1; arr[i*6+4] = h1; arr[i*6+5] = 0;
+                }
+                break;
+
+            case 'bars':
+                for (let i = 0; i < N; i++) {
+                    const x = (N > 1 ? i / (N-1) - 0.5 : 0) * width;
+                    const h = (freqData[ptBin(i, N)] / 255) * amplitude;
+                    arr[i*6]   = x; arr[i*6+1] = 0;  arr[i*6+2] = 0;
+                    arr[i*6+3] = x; arr[i*6+4] = h;  arr[i*6+5] = 0;
+                }
+                break;
+
+            case 'bars-both':
+                for (let i = 0; i < N; i++) {
+                    const x = (N > 1 ? i / (N-1) - 0.5 : 0) * width;
+                    const h = (freqData[ptBin(i, N)] / 255) * amplitude;
+                    arr[i*6]   = x; arr[i*6+1] = -h; arr[i*6+2] = 0;
+                    arr[i*6+3] = x; arr[i*6+4] =  h; arr[i*6+5] = 0;
+                }
+                break;
+
+            case 'line': {
+                const y = (ad.avgFrequency / 255) * amplitude;
+                arr[0] = -width*0.5; arr[1] = y; arr[2] = 0;
+                arr[3] =  width*0.5; arr[4] = y; arr[5] = 0;
+                break;
+            }
+        }
+
+        // Mark the underlying interleaved buffer for GPU upload
+        three.geometry.attributes.instanceStart.data.needsUpdate = true;
+    }
+
+    // ─────────────────────────────────────────
     //  Model loading
     // ─────────────────────────────────────────
     _getLoader(path) {
@@ -197,6 +362,7 @@ export class SceneBuilder {
             for (const obj of layer.objects) {
                 if (obj.type === 'model')      this._updateModel(obj, time);
                 if (obj.type === 'pointLight') obj.applyBindings(this.audioData);
+                if (obj.type === 'wave')       this._updateWave(obj);
             }
         }
 
@@ -294,6 +460,7 @@ export class SceneBuilder {
             highFreq:     avg(freqData, third*2, freqData.length),
             peak:         Math.max(...freqData),
             volume:       volume * 255,
+            freqData,
         };
     }
 
@@ -326,6 +493,10 @@ export class SceneBuilder {
                     const light = new PointLight(obj.color, 1, 100);
                     obj.threeObject = light;
                     scene.add(light);
+                } else if (obj.type === 'wave') {
+                    const three = this._createWaveThreeObject(obj);
+                    obj.threeObject = three;
+                    scene.add(three);
                 }
             }
         }

@@ -200,6 +200,33 @@ export class PointLightObject extends SceneObject {
 }
 
 // ─────────────────────────────────────────────
+//  WaveObject
+// ─────────────────────────────────────────────
+export class WaveObject extends SceneObject {
+    constructor() {
+        super('wave');
+        this.name     = 'Wave';
+        // 'circular' | 'linear' | 'linear-up' | 'bars' | 'bars-both' | 'line'
+        this.waveType = 'circular';
+        this.segments = 64;
+        this.color    = '#ffffff';
+        this.amplitude   = new PropertyBinding(0.5);
+        this.radius      = new PropertyBinding(1);   // circular: base ring radius
+        this.width       = new PropertyBinding(2);   // linear / bars / line: horizontal span
+        this.sampleCount = 512;                      // how many freq bins to read (1–analyser max)
+        this.lineWidth   = 5;                        // screen-space line width in pixels
+    }
+
+    toJSON() { return this._bindingsToJSON(); }
+
+    static fromJSON(d) {
+        const obj = new WaveObject();
+        obj._restoreBindings(d);
+        return obj;
+    }
+}
+
+// ─────────────────────────────────────────────
 //  Layer
 // ─────────────────────────────────────────────
 export class Layer {
@@ -232,6 +259,7 @@ export class Layer {
         layer.objects = (data.objects || []).map(o => {
             if (o.type === 'model')      return ModelObject.fromJSON(o);
             if (o.type === 'pointLight') return PointLightObject.fromJSON(o);
+            if (o.type === 'wave')       return WaveObject.fromJSON(o);
             return null;
         }).filter(Boolean);
         return layer;

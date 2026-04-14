@@ -3,7 +3,7 @@ import {
 } from './modules/three.js/build/three.module.js';
 
 import { SceneBuilder, PRESETS}    from './SceneBuilder.js';
-import { Layer, ModelObject, PointLightObject, PropertyBinding} from './Sceneobjects.js';
+import { Layer, ModelObject, PointLightObject, WaveObject, PropertyBinding} from './Sceneobjects.js';
 
 // ─────────────────────────────────────────────
 //  Scene
@@ -17,7 +17,7 @@ const builder = new SceneBuilder(canvas);
 const listener = new AudioListener();
 builder.camera.add(listener);
 const sound    = new Audio(listener);
-const analyser = new AudioAnalyser(sound, 32);
+const analyser = new AudioAnalyser(sound, 256);
 
 let audioBuffer = null;
 let audioContext = null;
@@ -170,6 +170,11 @@ function spawnPopup(title, popupFields) {
                     input.appendChild(z);
                 });
                 input.id = "popup-input-" + index;            }
+            else if (type === "color") {
+                input = document.createElement("input");
+                input.type = "color";
+                input.value = "#ffffff"; // default white
+            }
             else{
                 input.type = type;
             }
@@ -377,6 +382,7 @@ function selectLayer(layer) {
     const buttonBox = document.getElementById('layerTopButtons');
     buttonBox.innerHTML = '';
 
+    // Models only on non-base layers
     if (!layer.isBase) {
         const addModel = document.createElement('div');
         addModel.classList.add('Btn');
@@ -403,15 +409,31 @@ function selectLayer(layer) {
             })
             .catch(() => {});
         });
-
-        const addLight = document.createElement('div');
-        addLight.classList.add('Btn');
-        addLight.textContent = 'Add Light';
-        addLight.addEventListener('click', () => onAddLight(layer));
-
         buttonBox.appendChild(addModel);
-        buttonBox.appendChild(addLight);
     }
+
+    // Lights and waves available on all layers including background
+    const addLight = document.createElement('div');
+    addLight.classList.add('Btn');
+    addLight.textContent = 'Add Light';
+    addLight.addEventListener('click', () => onAddLight(layer));
+
+    const addWave = document.createElement('div');
+    addWave.classList.add('Btn');
+    addWave.textContent = 'Add Wave';
+    addWave.addEventListener('click', () => {
+        spawnPopup('Add Wave', [
+            ['Name',     'text'],
+            ['Type',     'select', ['circular','linear','linear-up','bars','bars-both','line']],
+            ['Segments', 'text'],
+            ['Color',    'color'],
+        ])
+        .then(data => onAddWave(layer, data))
+        .catch(() => {});
+    });
+
+    buttonBox.appendChild(addLight);
+    buttonBox.appendChild(addWave);
 
     renderObjectList(layer);
     document.getElementById('object-properties').innerHTML = '';
@@ -861,6 +883,44 @@ function renderObjectProperties(obj, layer) {
         section('Distance');
         bindingPanel('Distance', obj.distance);
     }
+
+    // ── Wave-specific ───────────────────────────
+    if (obj.type === 'wave') {
+        section('Wave');
+
+        selectInput('Type',
+            ['circular','linear','linear-up','bars','bars-both','line'],
+            () => obj.waveType,
+            v  => { obj.waveType = v; save(); }
+        );
+
+        colorInput('Color', () => obj.color, v => { obj.color = v; });
+
+        // Segments — integer, rebuilds geometry on change
+        const segRow = row('Segments');
+        const segNum = document.createElement('input');
+        segNum.type = 'number'; segNum.className = 'prop-number';
+        segNum.min = 2; segNum.max = 512; segNum.step = 1;
+        segNum.value = obj.segments;
+        segNum.addEventListener('change', () => {
+            obj.segments = Math.max(2, parseInt(segNum.value) || 2);
+            segNum.value = obj.segments;
+            save();
+        });
+        segRow.appendChild(segNum);
+
+        section('Amplitude');
+        bindingPanel('Amplitude', obj.amplitude);
+
+        slider('Samples', 1, 128, 1,
+            () => obj.sampleCount ?? 128,
+            v  => { obj.sampleCount = Math.round(v); }
+        );
+
+        section('Shape');
+        bindingPanel('Width', obj.width, { min: 1, max: 50 });
+        bindingPanel('Radius (circular)', obj.radius);
+    }
 }
 
 // ─────────────────────────────────────────────
@@ -888,6 +948,21 @@ function onAddLight(layer) {
     lightObj.intensity.max    = 10;
 
     builder.addLightToLayer(layer.id, lightObj);
+    renderObjectList(layer);
+    saveLayersToDB();
+}
+
+function onAddWave(layer, data) {
+    const waveObj      = new WaveObject();
+    waveObj.name       = data['Name'] || 'Wave';
+    waveObj.waveType   = data['Type'] || 'circular';
+    waveObj.segments   = Math.max(2, parseInt(data['Segments']) || 64);
+    waveObj.color      = /^#[0-9a-fA-F]{6}$/.test(data['Color']) ? data['Color'] : '#ffffff';
+    waveObj.amplitude.mode  = 'audio';
+    waveObj.amplitude.source = 'avgFrequency';
+    waveObj.amplitude.min   = 0;
+    waveObj.amplitude.max   = 1;
+    builder.addWaveToLayer(layer.id, waveObj);
     renderObjectList(layer);
     saveLayersToDB();
 }

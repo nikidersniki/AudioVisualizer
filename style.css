@@ -20,7 +20,8 @@
     --font-mono:     'Space Mono', 'Courier New', monospace;
     --font-display:  'VT323', monospace;
     --radius:        2px;
-    --panel-blur:    blur(24px);
+    --panel-blur:    blur(5px);
+    --pannel-bg:    #0f0f0f9c;
 }
 
 /* ── Reset ────────────────────────────────────────────────────── */
@@ -59,7 +60,7 @@ header {
     justify-content: space-between;
     padding: 0 10px;
     height: 32px;
-    background: rgba(8, 8, 8, 0.88);
+    background: var(--pannel-bg);
     backdrop-filter: var(--panel-blur);
     border-bottom: 1px solid var(--border-bright);
     font-family: var(--font-mono);
@@ -104,7 +105,7 @@ header .h2 {
     bottom: 0; left: 0; right: 0;
     z-index: 10001;
     padding: 28px 0 8px;
-    background: rgba(8, 8, 8, 0.88);
+    background: var(--pannel-bg);
     backdrop-filter: var(--panel-blur);
     border-top: 1px solid var(--border-bright);
     color: var(--text-dim);
@@ -143,7 +144,7 @@ header .h2 {
     font-size: 1.05rem;
     letter-spacing: 0.12em;
     color: var(--text-dim);
-    z-index: 1000;
+    z-index: 10005;
     pointer-events: none;
 }
 
@@ -153,7 +154,7 @@ header .h2 {
    PANELS
    ════════════════════════════════════════════════════════════════ */
 #controlls, #player {
-    background: rgba(10, 10, 10, 0.94);
+    background: var(--pannel-bg);
     backdrop-filter: var(--panel-blur);
     position: absolute;
     top: 32px;
