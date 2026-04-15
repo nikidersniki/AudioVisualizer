@@ -4,6 +4,13 @@ import {
     TextureLoader, RepeatWrapping, Color,
 } from './modules/three.js/build/three.module.js';
 
+import { UnrealBloomPass } from './modules/three.js/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { AfterimagePass }  from './modules/three.js/examples/jsm/postprocessing/AfterimagePass.js';
+import { FilmPass }        from './modules/three.js/examples/jsm/postprocessing/FilmPass.js';
+import { GlitchPass }      from './modules/three.js/examples/jsm/postprocessing/GlitchPass.js';
+import { DotScreenPass }   from './modules/three.js/examples/jsm/postprocessing/DotScreenPass.js';
+import { OutputPass }      from './modules/three.js/examples/jsm/postprocessing/OutputPass.js';
+
 // ── Noise texture (loaded once) ───────────────────────────────
 let _noiseTex = null;
 function _getOrLoadNoiseTex() {
@@ -14,18 +21,15 @@ function _getOrLoadNoiseTex() {
     return _noiseTex;
 }
 
-
 // ─────────────────────────────────────────────
-//  Shader registry
-//  Add an entry here to expose a new shader in the PP panel.
-//  GLSL files are loaded from /shaders/ at startup via initShaders().
+//  Shader registry  (custom GLSL passes)
 // ─────────────────────────────────────────────
 export const PP_SHADER_REGISTRY = {
     sketch: {
         name:         'Sketch',
         vertexPath:   './shaders/vertex.glsl',
         fragmentPath: './shaders/sketch.glsl',
-        _vertSrc: null, // populated by initShaders()
+        _vertSrc: null,
         _fragSrc: null,
         defaultProperties: { enableBlur: false, resolution: 20 },
         propertyDefs: [
@@ -41,16 +45,14 @@ export const PP_SHADER_REGISTRY = {
                 iMouse:      { value: new Vector4(0, 0, props.enableBlur ? 1 : 0, 0) },
             };
         },
-        // mSize is a GLSL compile-time const used for array sizes/loop bounds,
-        // so it must be injected into the source rather than sent as a uniform.
         patchFragmentSrc(src, props) {
             const size = Math.max(2, Math.round(props.resolution));
             return src.replace(/const int mSize\s*=\s*\d+\s*;/, `const int mSize = ${size};`);
         },
         updateUniforms(u, props, time, w, h) {
-            u.iTime.value        = time / 1000;
+            u.iTime.value    = time / 1000;
             u.iResolution.value.set(w, h);
-            u.iMouse.value.z     = props.enableBlur ? 1 : 0;
+            u.iMouse.value.z = props.enableBlur ? 1 : 0;
         },
     },
 
@@ -78,31 +80,34 @@ export const PP_SHADER_REGISTRY = {
     },
 
     pixelArt: {
-        name:         'Pixel Art',
+        name:         'Pixless Dither',
         vertexPath:   './shaders/vertex.glsl',
         fragmentPath: './shaders/pixelart.glsl',
         _vertSrc: null,
         _fragSrc: null,
-        defaultProperties: { edgeThreshold: 0.02, blockSize: 8, colorPower: 0.4545 },
+        defaultProperties: { ditherIntensity: 1.0, pixelSize: 4, paletteMode: 1, globalMix: 1.0 },
         propertyDefs: [
-            { key: 'edgeThreshold', label: 'Edge Threshold', type: 'slider', min: 0,   max: 0.5, step: 0.001 },
-            { key: 'blockSize',     label: 'Block Size',     type: 'slider', min: 1,   max: 32,  step: 1     },
-            { key: 'colorPower',    label: 'Color Power',    type: 'slider', min: 0.1, max: 3,   step: 0.01  },
+            { key: 'ditherIntensity', label: 'Dither Intensity', type: 'slider', min: 0,   max: 3,  step: 0.01 },
+            { key: 'pixelSize',       label: 'Pixel Size',       type: 'slider', min: 1,   max: 16, step: 1    },
+            { key: 'paletteMode',     label: 'Palette',          type: 'slider', min: 0,   max: 2,  step: 1    },
+            { key: 'globalMix',       label: 'Mix',              type: 'slider', min: 0,   max: 1,  step: 0.01 },
         ],
         buildUniforms(props, w, h) {
             return {
-                tDiffuse:       { value: null },
-                iResolution:    { value: new Vector2(w, h) },
-                uEdgeThreshold: { value: props.edgeThreshold },
-                uBlockSize:     { value: props.blockSize },
-                uColorPower:    { value: props.colorPower },
+                tDiffuse:        { value: null },
+                iResolution:     { value: new Vector2(w, h) },
+                uDitherIntensity:{ value: props.ditherIntensity },
+                uPixelSize:      { value: props.pixelSize },
+                uPaletteMode:    { value: props.paletteMode },
+                uGlobalMix:      { value: props.globalMix },
             };
         },
         updateUniforms(u, props, _time, w, h) {
             u.iResolution.value.set(w, h);
-            u.uEdgeThreshold.value = props.edgeThreshold;
-            u.uBlockSize.value     = props.blockSize;
-            u.uColorPower.value    = props.colorPower;
+            u.uDitherIntensity.value = props.ditherIntensity;
+            u.uPixelSize.value       = props.pixelSize;
+            u.uPaletteMode.value     = props.paletteMode;
+            u.uGlobalMix.value       = props.globalMix;
         },
     },
 
@@ -112,12 +117,7 @@ export const PP_SHADER_REGISTRY = {
         fragmentPath: './shaders/sinethresholder.glsl',
         _vertSrc: null,
         _fragSrc: null,
-        defaultProperties: {
-            frequency: 10,
-            displace:  40,
-            color0: '#000000',
-            color1: '#ffffff',
-        },
+        defaultProperties: { frequency: 10, displace: 40, color0: '#000000', color1: '#ffffff' },
         propertyDefs: [
             { key: 'frequency', label: 'Frequency', type: 'slider', min: 1, max: 100, step: 0.1 },
             { key: 'displace',  label: 'Displace',  type: 'slider', min: 0, max: 200, step: 0.1 },
@@ -142,77 +142,31 @@ export const PP_SHADER_REGISTRY = {
             u.uColor1.value.set(props.color1);
         },
     },
-            blur: {
-            name:         'Blur',
-            vertexPath:   './shaders/vertex.glsl',
-            fragmentPath: './shaders/blur.glsl',
-            _vertSrc: null,
-            _fragSrc: null,
-                
-            defaultProperties: {
-                radius: 5,
-            },
-        
-            propertyDefs: [
-                { key: 'radius', label: 'Blur Radius', type: 'slider', min: 0, max: 20, step: 0.1 },
-            ],
-        
-            buildUniforms(props, w, h) {
-                return {
-                    tDiffuse:    { value: null },
-                    iResolution: { value: new Vector2(w, h) },
-                    uTexelSize:  { value: new Vector2(1 / w, 1 / h) },
-                    uRadius:     { value: props.radius },
-                };
-            },
-        
-            updateUniforms(u, props, _time, w, h) {
-                u.iResolution.value.set(w, h);
-                u.uTexelSize.value.set(1 / w, 1 / h);
-                u.uRadius.value = props.radius;
-            },
+
+    blur: {
+        name:         'Blur',
+        vertexPath:   './shaders/vertex.glsl',
+        fragmentPath: './shaders/blur.glsl',
+        _vertSrc: null,
+        _fragSrc: null,
+        defaultProperties: { radius: 5 },
+        propertyDefs: [
+            { key: 'radius', label: 'Blur Radius', type: 'slider', min: 0, max: 20, step: 0.1 },
+        ],
+        buildUniforms(props, w, h) {
+            return {
+                tDiffuse:    { value: null },
+                iResolution: { value: new Vector2(w, h) },
+                uTexelSize:  { value: new Vector2(1 / w, 1 / h) },
+                uRadius:     { value: props.radius },
+            };
         },
-        bloom: {
-            name:         'Bloom',
-            vertexPath:   './shaders/vertex.glsl',
-            fragmentPath: './shaders/bloom.glsl',
-            _vertSrc: null,
-            _fragSrc: null,
-                
-            defaultProperties: {
-                threshold: 0.8,
-                intensity: 1.5,
-                radius: 4.0,
-            },
-        
-            propertyDefs: [
-                { key: 'threshold', label: 'Threshold', type: 'slider', min: 0,   max: 1,   step: 0.01 },
-                { key: 'intensity', label: 'Intensity', type: 'slider', min: 0,   max: 5,   step: 0.01 },
-                { key: 'radius',    label: 'Radius',    type: 'slider', min: 0,   max: 10,  step: 0.1  },
-            ],
-        
-            buildUniforms(props, w, h) {
-                return {
-                    tDiffuse:    { value: null },
-                    iResolution: { value: new Vector2(w, h) },
-                
-                    uThreshold:   { value: props.threshold },
-                    uIntensity:   { value: props.intensity },
-                    uRadius:      { value: props.radius },
-                
-                    uTexelSize:   { value: new Vector2(1 / w, 1 / h) },
-                };
-            },
-        
-            updateUniforms(u, props, _time, w, h) {
-                u.iResolution.value.set(w, h);
-                u.uTexelSize.value.set(1 / w, 1 / h);
-            
-                u.uThreshold.value = props.threshold;
-                u.uIntensity.value = props.intensity;
-                u.uRadius.value = props.radius;
-            },
+        updateUniforms(u, props, _time, w, h) {
+            u.iResolution.value.set(w, h);
+            u.uTexelSize.value.set(1 / w, 1 / h);
+            u.uRadius.value = props.radius;
         },
+    },
 };
 
 // Load all shader GLSL sources from disk — call once at app startup
@@ -228,7 +182,134 @@ export async function initShaders() {
 }
 
 // ─────────────────────────────────────────────
-//  PostProcessingLayer  — one shader pass
+//  Native pass registry  (Three.js built-in passes)
+// ─────────────────────────────────────────────
+const _bloomFactors = [1.0, 0.8, 0.6, 0.4, 0.2];
+
+export const PP_NATIVE_REGISTRY = {
+    unrealBloom: {
+        name: 'Bloom (Unreal)',
+        // UnrealBloomPass additively blends bloom onto readBuffer in-place (not writeBuffer).
+        // The pipeline must NOT advance srcTarget/ppIdx after this pass when it is not last.
+        writesToReadBuffer: true,
+        defaultProperties: { threshold: 0.5, strength: 1.5, radius: 0.4, samples: 5 },
+        propertyDefs: [
+            { key: 'threshold', label: 'Threshold', type: 'slider', min: 0, max: 1, step: 0.01 },
+            { key: 'strength',  label: 'Strength',  type: 'slider', min: 0, max: 5, step: 0.01 },
+            { key: 'radius',    label: 'Radius',    type: 'slider', min: 0, max: 1, step: 0.01 },
+            { key: 'samples',   label: 'Samples',   type: 'slider', min: 1, max: 5, step: 1    },
+        ],
+        create: (w, h, p) => new UnrealBloomPass(new Vector2(w, h), p.strength, p.radius, p.threshold),
+        update(pass, props) {
+            pass.threshold = props.threshold;
+            pass.strength  = props.strength;
+            pass.radius    = props.radius;
+            const n = Math.round(props.samples);
+            pass.compositeMaterial.uniforms['bloomFactors'].value =
+                _bloomFactors.map((f, i) => i < n ? f : 0);
+        },
+    },
+
+    afterimage: {
+        name: 'Afterimage',
+        defaultProperties: { damp: 0.96 },
+        propertyDefs: [
+            { key: 'damp', label: 'Damp', type: 'slider', min: 0, max: 1, step: 0.01 },
+        ],
+        create: (_w, _h, p) => new AfterimagePass(p.damp),
+        update: (pass, props) => { pass.uniforms['damp'].value = props.damp; },
+    },
+
+    film: {
+        name: 'Film Grain',
+        defaultProperties: { intensity: 0.5, grayscale: false },
+        propertyDefs: [
+            { key: 'intensity', label: 'Intensity', type: 'slider', min: 0, max: 1, step: 0.01 },
+            { key: 'grayscale', label: 'Grayscale', type: 'checkbox' },
+        ],
+        create: (_w, _h, p) => new FilmPass(p.intensity, p.grayscale),
+        update(pass, props) {
+            pass.uniforms['intensity'].value = props.intensity;
+            pass.uniforms['grayscale'].value = props.grayscale;
+        },
+    },
+
+    glitch: {
+        name: 'Glitch',
+        defaultProperties: { goWild: false },
+        propertyDefs: [
+            { key: 'goWild', label: 'Go Wild', type: 'checkbox' },
+        ],
+        create: () => new GlitchPass(),
+        update: (pass, props) => { pass.goWild = props.goWild; },
+    },
+
+    dotScreen: {
+        name: 'Dot Screen',
+        defaultProperties: { angle: 0.5, scale: 1.0 },
+        propertyDefs: [
+            { key: 'angle', label: 'Angle', type: 'slider', min: 0,   max: 3.14, step: 0.01 },
+            { key: 'scale', label: 'Scale', type: 'slider', min: 0.1, max: 10,   step: 0.1  },
+        ],
+        create: (_w, _h, p) => new DotScreenPass(undefined, p.angle, p.scale),
+        update(pass, props) {
+            pass.uniforms['angle'].value = props.angle;
+            pass.uniforms['scale'].value = props.scale;
+        },
+    },
+
+    output: {
+        name: 'Output (Tone Map)',
+        defaultProperties: {},
+        propertyDefs: [],
+        create: () => new OutputPass(),
+        update: () => {},
+    },
+};
+
+// ─────────────────────────────────────────────
+//  NativePassLayer  — wraps any Three.js built-in pass
+// ─────────────────────────────────────────────
+export class NativePassLayer {
+    constructor(passType) {
+        this.id         = crypto.randomUUID();
+        this.passType   = passType;
+        const reg       = PP_NATIVE_REGISTRY[passType];
+        this.name       = reg?.name ?? passType;
+        this.visible    = true;
+        this.properties = { ...(reg?.defaultProperties ?? {}) };
+        this._pass      = null;
+    }
+
+    get propertyDefs() { return PP_NATIVE_REGISTRY[this.passType]?.propertyDefs ?? []; }
+
+    getPass(w, h) {
+        if (!this._pass)
+            this._pass = PP_NATIVE_REGISTRY[this.passType]?.create(w, h, this.properties);
+        return this._pass;
+    }
+
+    resize(w, h) { this._pass?.setSize?.(w, h); }
+
+    invalidateMaterial() { this._pass?.dispose?.(); this._pass = null; }
+
+    toJSON() {
+        return { id: this.id, type: 'native', passType: this.passType,
+                 name: this.name, visible: this.visible, properties: { ...this.properties } };
+    }
+
+    static fromJSON(d) {
+        const l = new NativePassLayer(d.passType);
+        l.id         = d.id;
+        l.name       = d.name    ?? l.name;
+        l.visible    = d.visible ?? true;
+        l.properties = { ...l.properties, ...d.properties };
+        return l;
+    }
+}
+
+// ─────────────────────────────────────────────
+//  PostProcessingLayer  — one custom GLSL shader pass
 // ─────────────────────────────────────────────
 export class PostProcessingLayer {
     constructor(shaderName) {
@@ -299,12 +380,16 @@ export class PostProcessingPipeline {
         this.width = w; this.height = h;
         this._ping.setSize(w, h);
         this._pong.setSize(w, h);
-        for (const layer of this.layers) layer.invalidateMaterial();
+        for (const layer of this.layers) {
+            if (layer instanceof NativePassLayer) layer.resize(w, h);
+            else layer.invalidateMaterial();
+        }
     }
 
-    // inputTarget: WebGLRenderTarget containing the 3D scene.
-    // Outputs to screen (renderTarget = null).
     apply(inputTarget, time) {
+        const deltaTime = this._lastTime === undefined ? 0.016 : (time - this._lastTime) / 1000;
+        this._lastTime  = time;
+
         const active = this.layers.filter(l => l.visible);
 
         if (active.length === 0) {
@@ -316,20 +401,41 @@ export class PostProcessingPipeline {
         }
 
         const pingpong = [this._ping, this._pong];
-        let srcTex = inputTarget.texture;
-        let ppIdx  = 0;
+        let srcTarget  = inputTarget;
+        let ppIdx      = 0;
 
         for (let i = 0; i < active.length; i++) {
-            const layer = active[i];
-            const mat   = layer.getMaterial(this.width, this.height);
+            const layer  = active[i];
+            const isLast = i === active.length - 1;
+
+            if (layer instanceof NativePassLayer) {
+                const pass = layer.getPass(this.width, this.height);
+                if (!pass) continue;
+                const reg = PP_NATIVE_REGISTRY[layer.passType];
+                reg?.update(pass, layer.properties, this.width, this.height);
+                pass.renderToScreen = isLast;
+                const dst = isLast ? null : pingpong[ppIdx];
+                pass.render(this.renderer, dst, srcTarget, deltaTime, false);
+                // UnrealBloomPass (and any pass with writesToReadBuffer) blends its output
+                // back onto readBuffer in-place rather than writing to writeBuffer.
+                // srcTarget already contains the result — do NOT advance to dst.
+                if (!isLast && !reg?.writesToReadBuffer) {
+                    srcTarget = dst;
+                    ppIdx = 1 - ppIdx;
+                }
+                continue;
+            }
+
+            // Custom GLSL shader layer
+            const mat = layer.getMaterial(this.width, this.height);
             if (!mat) continue;
 
             PP_SHADER_REGISTRY[layer.shaderName]
                 ?.updateUniforms(mat.uniforms, layer.properties, time, this.width, this.height);
-            mat.uniforms.tDiffuse.value = srcTex;
+            mat.uniforms.tDiffuse.value = srcTarget.texture;
             this._quad.material = mat;
 
-            if (i === active.length - 1) {
+            if (isLast) {
                 this.renderer.setRenderTarget(null);
                 this.renderer.render(this._scene, this._cam);
             } else {
@@ -339,7 +445,7 @@ export class PostProcessingPipeline {
                 this.renderer.setClearColor(0, 0);
                 this.renderer.clear();
                 this.renderer.render(this._scene, this._cam);
-                srcTex = dst.texture;
+                srcTarget = dst;
             }
         }
     }

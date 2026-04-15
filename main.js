@@ -4,7 +4,7 @@ import {
 
 import { SceneBuilder, PRESETS}    from './SceneBuilder.js';
 import { Layer, ModelObject, PointLightObject, WaveObject, PropertyBinding} from './Sceneobjects.js';
-import { PP_SHADER_REGISTRY, PostProcessingLayer, PostProcessingPipeline, initShaders } from './PostProcessing.js';
+import { PP_SHADER_REGISTRY, PP_NATIVE_REGISTRY, PostProcessingLayer, PostProcessingPipeline, NativePassLayer, initShaders } from './PostProcessing.js';
 
 // ─────────────────────────────────────────────
 //  Scene
@@ -395,15 +395,15 @@ function renderPPLayerProperties(ppLayer) {
     const panel = document.getElementById('pp-layer-properties');
     panel.innerHTML = '';
 
-    const reg = PP_SHADER_REGISTRY[ppLayer.shaderName];
-    if (!reg) return;
+    const defs = ppLayer.propertyDefs ?? PP_SHADER_REGISTRY[ppLayer.shaderName]?.propertyDefs;
+    if (!defs) return;
 
     const title = document.createElement('div');
     title.className = 'h2 prop-section-title';
     title.textContent = ppLayer.name;
     panel.appendChild(title);
 
-    for (const def of reg.propertyDefs) {
+    for (const def of defs) {
         const rowEl = document.createElement('div');
         rowEl.className = 'prop-row';
 
@@ -419,7 +419,7 @@ function renderPPLayerProperties(ppLayer) {
             inp.checked = ppLayer.properties[def.key];
             inp.addEventListener('change', () => {
                 ppLayer.properties[def.key] = inp.checked;
-                ppLayer.invalidateMaterial();
+                ppLayer.invalidateMaterial?.();
                 savePPLayersToDB();
             });
             rowEl.appendChild(inp);
@@ -444,13 +444,13 @@ function renderPPLayerProperties(ppLayer) {
             slider.addEventListener('input', () => {
                 ppLayer.properties[def.key] = parseFloat(slider.value);
                 num.value = ppLayer.properties[def.key];
-                ppLayer.invalidateMaterial();
+                ppLayer.invalidateMaterial?.();
                 savePPLayersToDB();
             });
             num.addEventListener('input', () => {
                 ppLayer.properties[def.key] = parseFloat(num.value);
                 slider.value = ppLayer.properties[def.key];
-                ppLayer.invalidateMaterial();
+                ppLayer.invalidateMaterial?.();
                 savePPLayersToDB();
             });
 
@@ -1389,7 +1389,11 @@ window.addEventListener('load', async () => {
     builder.setPostPipeline(pipeline);
 
     const savedPP = await loadPPLayersFromDB();
-    ppLayers = savedPP.map(d => PostProcessingLayer.fromJSON(d));
+    ppLayers = savedPP.map(d => {
+        if (d.type === 'native') return NativePassLayer.fromJSON(d);
+        if (d.type === 'bloom') return NativePassLayer.fromJSON({ ...d, type: 'native', passType: 'unrealBloom' });
+        return PostProcessingLayer.fromJSON(d);
+    });
     pipeline.layers = ppLayers;
     renderPPLayerList();
 
@@ -1401,11 +1405,16 @@ window.addEventListener('load', async () => {
     document.getElementById('add-pp-layer').addEventListener('click', () => {
         const shaderKeys  = Object.keys(PP_SHADER_REGISTRY);
         const shaderNames = shaderKeys.map(k => PP_SHADER_REGISTRY[k].name);
+        const nativeKeys  = Object.keys(PP_NATIVE_REGISTRY);
+        const nativeNames = nativeKeys.map(k => PP_NATIVE_REGISTRY[k].name);
         spawnPopup('Add Post FX', [
-            ['Effect', 'select', shaderNames],
+            ['Effect', 'select', [...shaderNames, ...nativeNames]],
         ]).then(data => {
-            const key   = shaderKeys[shaderNames.indexOf(data['Effect'])];
-            const layer = new PostProcessingLayer(key);
+            const effectName = data['Effect'];
+            const nativeIdx  = nativeNames.indexOf(effectName);
+            const layer = nativeIdx !== -1
+                ? new NativePassLayer(nativeKeys[nativeIdx])
+                : new PostProcessingLayer(shaderKeys[shaderNames.indexOf(effectName)]);
             ppLayers.push(layer);
             pipeline.layers = ppLayers;
             renderPPLayerList();

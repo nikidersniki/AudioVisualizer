@@ -214,7 +214,8 @@ export class WaveObject extends SceneObject {
         this.color    = '#ffffff';
         this.amplitude   = new PropertyBinding(0.5);
         this.radius      = new PropertyBinding(1);   // circular: base ring radius
-        this.width       = new PropertyBinding(2);   // linear / bars / line: horizontal span
+        this.width       = new PropertyBinding(2);   // linear / line: horizontal span
+        this.barSpacing  = new PropertyBinding(0.05); // bars / bars-both: distance between bar centers
         this.sampleCount = 512;                      // how many freq bins to read (1–analyser max)
         this.lineWidth   = 5;                        // screen-space line width in pixels
         this.opacity     = 0.5;
