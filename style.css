@@ -203,12 +203,17 @@ header .h2 {
     color: var(--text-dim);
     font-size: 0.68rem;
     letter-spacing: 0.04em;
-    border-bottom: 1px solid var(--border);
 }
 #controlls > label input[type="range"] {
     flex: 1;
     accent-color: var(--accent);
     cursor: pointer;
+}
+#editorSwitch{
+    display:flex;
+    justify-content: space-between;
+    padding:0px;
+    white-space: nowrap;
 }
 
 #player > label {
@@ -223,6 +228,7 @@ header .h2 {
     border-top: 1px solid var(--border);
     margin-top: 4px;
 }
+
 input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
 
 /* ════════════════════════════════════════════════════════════════
@@ -376,7 +382,6 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
 #current-layer-controls {
     padding: 6px 0;
     border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
 }
 
 #layerTopButtons {
@@ -411,7 +416,10 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
 .move-up      { background-image: url('Graphics/arrowup-svgrepo-com.svg'); }
 .move-down    { background-image: url('Graphics/arrowdown-svgrepo-com.svg'); }
 .remove-layer     { background-image: url('Graphics/minus-svgrepo-com.svg'); }
-.duplicate-object { background-image: url('Graphics/duplicate-svgrepo-com.svg'); }
+
+.duplicate-object {
+    background-image: url('Graphics/duplicate-svgrepo-com.svg');
+}
 
 .obj-btn-group {
     display: flex;
@@ -578,10 +586,12 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
 }
 
 #object-properties {
+    border-top: 1px solid var(--border);
     display: flex;
     flex-direction: column;
     gap: 1px;
     padding-bottom: 20px;
+    padding:6px;
 }
 
 .prop-section-title {
@@ -749,4 +759,37 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
     background: var(--bg-hover);
     color: var(--text);
     border-color: var(--border-bright);
+}
+#oe-btn, #pp-editor {
+    justify-content: center;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   POST PROCESSING PANEL
+   ════════════════════════════════════════════════════════════════ */
+#pp-layer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 10px;
+    margin-top: 4px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+}
+
+#add-pp-layer { background-image: url('Graphics/plus-svgrepo-com.svg'); }
+
+#pp-layer-list {
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0;
+}
+
+#pp-layer-properties {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 6px 0 20px;
+    border-top: 1px solid var(--border);
 }

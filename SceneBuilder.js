@@ -15,10 +15,10 @@ import { FBXLoader }     from './modules/three.js/examples/jsm/loaders/FBXLoader
 import { OBJLoader }     from './modules/three.js/examples/jsm/loaders/OBJLoader.js';
 import { SimplexNoise }  from './modules/three.js/examples/jsm/math/SimplexNoise.js';
 import { EXRLoader }     from './modules/three.js/examples/jsm/loaders/EXRLoader.js';
-import { mergeVertices } from './modules/three.js/examples/jsm/utils/BufferGeometryUtils.js';
+import { mergeVertices }      from './modules/three.js/examples/jsm/utils/BufferGeometryUtils.js';
+import { TransformControls }  from './modules/three.js/examples/jsm/controls/TransformControls.js';
 
 import { Layer, ModelObject, PointLightObject, WaveObject } from './Sceneobjects.js';
-
 // ─────────────────────────────────────────────
 //  Model catalogue  (add entries here to expand)
 // ─────────────────────────────────────────────
@@ -60,6 +60,8 @@ export class SceneBuilder {
             this.camera.updateProjectionMatrix();
             this.renderer.setSize(this.width, this.height);
             this._layerTargets.forEach(t => t.setSize(this.width, this.height));
+            this._finalTarget.setSize(this.width, this.height);
+            this._postPipeline?.resize(this.width, this.height);
         });
 
         new EXRLoader().load('./Graphics/pond_bridge_night_1k.exr', (tex) => {
@@ -94,7 +96,7 @@ export class SceneBuilder {
         );
         this._compositeScene  = new Scene();
         this._compositeScene.add(this._compositeQuad);
-
+        
         // ── Audio data (updated externally each frame) ─
         this.audioData = {
             avgFrequency: 0,
@@ -104,6 +106,24 @@ export class SceneBuilder {
             peak:         0,
             volume:       0,
         };
+
+        // ── Final composite target + PP pipeline hook ──
+        this._finalTarget  = new WebGLRenderTarget(this.width, this.height);
+        this._postPipeline = null;
+
+        // ── Gizmo overlay (TransformControls) ─────────
+        this._gizmoScene = new Scene();
+        this._transformControls = new TransformControls(this.camera, this.renderer.domElement);
+        this._transformControls.setMode('translate');
+        this._gizmoScene.add(this._transformControls._root); // _root is the Object3D
+        this._gizmoChangeHandler = null;
+
+        window.addEventListener('keydown', e => {
+            if (!this._transformControls.object) return;
+            if (e.key === 't') this._transformControls.setMode('translate');
+            if (e.key === 'r') this._transformControls.setMode('rotate');
+            if (e.key === 's') this._transformControls.setMode('scale');
+        });
     }
 
     // ─────────────────────────────────────────
@@ -130,6 +150,54 @@ export class SceneBuilder {
     }
 
     getLayer(id) { return this.layers.find(l => l.id === id) ?? null; }
+
+    // ─────────────────────────────────────────
+    //  Post-processing pipeline
+    // ─────────────────────────────────────────
+    setPostPipeline(pipeline) { this._postPipeline = pipeline; }
+
+    // ─────────────────────────────────────────
+    //  Gizmo (TransformControls)
+    // ─────────────────────────────────────────
+    attachGizmo(obj, onChange, onLiveUpdate) {
+        this.detachGizmo();
+        if (!obj?.threeObject) return;
+        this._transformControls.attach(obj.threeObject);
+        this._gizmoChangeHandler = () => {
+            const t = obj.threeObject;
+            if (!t) return;
+            if (obj.posX.mode === 'constant') obj.posX.value = t.position.x;
+            if (obj.posY.mode === 'constant') obj.posY.value = t.position.y;
+            if (obj.posZ.mode === 'constant') obj.posZ.value = t.position.z;
+            if (obj.rotX.mode === 'constant') obj.rotX.value = t.rotation.x;
+            if (obj.rotY.mode === 'constant') obj.rotY.value = t.rotation.y;
+            if (obj.rotZ.mode === 'constant') obj.rotZ.value = t.rotation.z;
+            // ModelObject applies scale as: scaleX.value * audioScale * 0.01
+            // Reverse that factor so the stored value stays correct.
+            if (obj.type === 'model') {
+                const as = obj.audioScale.mode === 'constant' ? obj.audioScale.value : 1;
+                const sf = as * 0.01;
+                if (obj.scaleX.mode === 'constant') obj.scaleX.value = t.scale.x / sf;
+                if (obj.scaleY.mode === 'constant') obj.scaleY.value = t.scale.y / sf;
+                if (obj.scaleZ.mode === 'constant') obj.scaleZ.value = t.scale.z / sf;
+            } else {
+                if (obj.scaleX.mode === 'constant') obj.scaleX.value = t.scale.x;
+                if (obj.scaleY.mode === 'constant') obj.scaleY.value = t.scale.y;
+                if (obj.scaleZ.mode === 'constant') obj.scaleZ.value = t.scale.z;
+            }
+            onLiveUpdate?.();
+            onChange?.();
+        };
+        this._transformControls.addEventListener('change', this._gizmoChangeHandler);
+    }
+
+    detachGizmo() {
+        if (this._gizmoChangeHandler) {
+            this._transformControls.removeEventListener('change', this._gizmoChangeHandler);
+            this._gizmoChangeHandler = null;
+        }
+        this._transformControls.detach();
+    }
 
     // ─────────────────────────────────────────
     //  Object management
@@ -417,9 +485,8 @@ export class SceneBuilder {
             }
         }
 
-        // Render each layer into its own render target (transparent background),
-        // then composite onto the screen with the layer's opacity for true blending.
-        this.renderer.setRenderTarget(null);
+        // 1. Composite all 3D layers → _finalTarget
+        this.renderer.setRenderTarget(this._finalTarget);
         this.renderer.setClearColor(0x000000, 1);
         this.renderer.clear();
 
@@ -429,18 +496,34 @@ export class SceneBuilder {
             const target = this._layerTargets.get(layer.id);
             if (!scene || !target) continue;
 
-            // Render layer scene to its render target with a transparent clear
             this.renderer.setRenderTarget(target);
             this.renderer.setClearColor(0x000000, 0);
             this.renderer.clear();
             this.renderer.render(scene, this.camera);
 
-            // Composite onto the main framebuffer
-            this.renderer.setRenderTarget(null);
+            this.renderer.setRenderTarget(this._finalTarget);
             this._compositeQuad.material.map     = target.texture;
             this._compositeQuad.material.opacity = layer.opacity ?? 1;
             this._compositeQuad.material.needsUpdate = true;
             this.renderer.render(this._compositeScene, this._compositeCamera);
+        }
+
+        // 2. PP pipeline → screen  (or direct blit if no pipeline)
+        if (this._postPipeline) {
+            this._postPipeline.apply(this._finalTarget, time);
+        } else {
+            this.renderer.setRenderTarget(null);
+            this._compositeQuad.material.map     = this._finalTarget.texture;
+            this._compositeQuad.material.opacity = 1;
+            this._compositeQuad.material.needsUpdate = true;
+            this.renderer.render(this._compositeScene, this._compositeCamera);
+        }
+
+        // 3. Gizmo overlay — always on top, after PP
+        if (this._transformControls.object) {
+            this.renderer.setRenderTarget(null);
+            this.renderer.clearDepth();
+            this.renderer.render(this._gizmoScene, this.camera);
         }
 
         this.renderer.setClearColor(0x000000, 1);

@@ -4,6 +4,7 @@ import {
 
 import { SceneBuilder, PRESETS}    from './SceneBuilder.js';
 import { Layer, ModelObject, PointLightObject, WaveObject, PropertyBinding} from './Sceneobjects.js';
+import { PP_SHADER_REGISTRY, PostProcessingLayer, PostProcessingPipeline, initShaders } from './PostProcessing.js';
 
 // ─────────────────────────────────────────────
 //  Scene
@@ -82,6 +83,23 @@ async function loadLayersFromDB() {
     return new Promise((res, rej) => {
         const req = tx.objectStore(LAYERS_STORE).get('current');
         req.onsuccess = () => res(req.result?.layers ?? null);
+        req.onerror   = () => rej(req.error);
+    });
+}
+
+async function savePPLayersToDB() {
+    const db = await openDB();
+    const tx = db.transaction(LAYERS_STORE, 'readwrite');
+    tx.objectStore(LAYERS_STORE).put({ id: 'ppLayers', layers: ppLayers.map(l => l.toJSON()) });
+    return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+}
+
+async function loadPPLayersFromDB() {
+    const db = await openDB();
+    const tx = db.transaction(LAYERS_STORE, 'readonly');
+    return new Promise((res, rej) => {
+        const req = tx.objectStore(LAYERS_STORE).get('ppLayers');
+        req.onsuccess = () => res(req.result?.layers ?? []);
         req.onerror   = () => rej(req.error);
     });
 }
@@ -280,9 +298,186 @@ progressBar.addEventListener('click', (e) => {
 });
 
 // ─────────────────────────────────────────────
+//  Post-processing state
+// ─────────────────────────────────────────────
+let ppLayers   = [];
+let pipeline   = null;  // PostProcessingPipeline, created after initShaders()
+
+// ─────────────────────────────────────────────
+//  Tab switching (Object Editor ↔ Post Processing)
+// ─────────────────────────────────────────────
+function switchTab(tab) {
+    const isOE = tab === 'oe';
+    document.getElementById('layers').style.display                = isOE ? '' : 'none';
+    document.getElementById('current-layer-controls').style.display = isOE ? '' : 'none';
+    document.getElementById('pp-section').style.display            = isOE ? 'none' : '';
+    document.getElementById('oe-btn').classList.toggle('selected',  isOE);
+    document.getElementById('pp-editor').classList.toggle('selected', !isOE);
+}
+
+// ─────────────────────────────────────────────
+//  Post-processing layer list UI
+// ─────────────────────────────────────────────
+function renderPPLayerList() {
+    const container = document.getElementById('pp-layer-list');
+    container.innerHTML = '';
+    for (const layer of ppLayers) addPPLayerElement(layer);
+}
+
+function addPPLayerElement(ppLayer) {
+    const el = document.createElement('div');
+    el.classList.add('list-button');
+    el.style.justifyContent = 'space-between';
+    el.dataset.ppLayerId = ppLayer.id;
+
+    const name = document.createElement('span');
+    name.textContent = ppLayer.name;
+
+    const btnGroup = document.createElement('div');
+    btnGroup.className = 'obj-btn-group';
+
+    const mkBtn = cls => {
+        const b = document.createElement('div');
+        b.classList.add(cls, 'image-button');
+        return b;
+    };
+
+    const upBtn = mkBtn('move-up');
+    upBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        const idx = ppLayers.indexOf(ppLayer);
+        if (idx > 0) {
+            [ppLayers[idx], ppLayers[idx - 1]] = [ppLayers[idx - 1], ppLayers[idx]];
+            pipeline.layers = ppLayers;
+            renderPPLayerList();
+            savePPLayersToDB();
+        }
+    });
+
+    const downBtn = mkBtn('move-down');
+    downBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        const idx = ppLayers.indexOf(ppLayer);
+        if (idx < ppLayers.length - 1) {
+            [ppLayers[idx], ppLayers[idx + 1]] = [ppLayers[idx + 1], ppLayers[idx]];
+            pipeline.layers = ppLayers;
+            renderPPLayerList();
+            savePPLayersToDB();
+        }
+    });
+
+    const removeBtn = mkBtn('remove-layer');
+    removeBtn.addEventListener('click', e => {
+        e.stopPropagation();
+        ppLayers = ppLayers.filter(l => l.id !== ppLayer.id);
+        pipeline.layers = ppLayers;
+        renderPPLayerList();
+        document.getElementById('pp-layer-properties').innerHTML = '';
+        savePPLayersToDB();
+    });
+
+    btnGroup.appendChild(removeBtn);
+    btnGroup.appendChild(upBtn);
+    btnGroup.appendChild(downBtn);
+    el.appendChild(name);
+    el.appendChild(btnGroup);
+
+    el.addEventListener('click', () => {
+        document.querySelectorAll('#pp-layer-list .list-button').forEach(e =>
+            e.classList.toggle('selected', e.dataset.ppLayerId === ppLayer.id));
+        renderPPLayerProperties(ppLayer);
+    });
+
+    document.getElementById('pp-layer-list').appendChild(el);
+}
+
+function renderPPLayerProperties(ppLayer) {
+    const panel = document.getElementById('pp-layer-properties');
+    panel.innerHTML = '';
+
+    const reg = PP_SHADER_REGISTRY[ppLayer.shaderName];
+    if (!reg) return;
+
+    const title = document.createElement('div');
+    title.className = 'h2 prop-section-title';
+    title.textContent = ppLayer.name;
+    panel.appendChild(title);
+
+    for (const def of reg.propertyDefs) {
+        const rowEl = document.createElement('div');
+        rowEl.className = 'prop-row';
+
+        const lbl = document.createElement('label');
+        lbl.className = 'prop-label';
+        lbl.textContent = def.label;
+        rowEl.appendChild(lbl);
+
+        if (def.type === 'checkbox') {
+            const inp = document.createElement('input');
+            inp.type = 'checkbox';
+            inp.className = 'prop-checkbox';
+            inp.checked = ppLayer.properties[def.key];
+            inp.addEventListener('change', () => {
+                ppLayer.properties[def.key] = inp.checked;
+                ppLayer.invalidateMaterial();
+                savePPLayersToDB();
+            });
+            rowEl.appendChild(inp);
+        } else if (def.type === 'slider') {
+            const wrap = document.createElement('div');
+            wrap.className = 'prop-slider-wrap';
+
+            const slider = document.createElement('input');
+            slider.type = 'range';
+            slider.className = 'prop-slider';
+            slider.min  = def.min  ?? 0;
+            slider.max  = def.max  ?? 1;
+            slider.step = def.step ?? 0.01;
+            slider.value = ppLayer.properties[def.key];
+
+            const num = document.createElement('input');
+            num.type = 'number';
+            num.className = 'prop-number';
+            num.step  = def.step ?? 0.01;
+            num.value = ppLayer.properties[def.key];
+
+            slider.addEventListener('input', () => {
+                ppLayer.properties[def.key] = parseFloat(slider.value);
+                num.value = ppLayer.properties[def.key];
+                ppLayer.invalidateMaterial();
+                savePPLayersToDB();
+            });
+            num.addEventListener('input', () => {
+                ppLayer.properties[def.key] = parseFloat(num.value);
+                slider.value = ppLayer.properties[def.key];
+                ppLayer.invalidateMaterial();
+                savePPLayersToDB();
+            });
+
+            wrap.appendChild(slider);
+            wrap.appendChild(num);
+            rowEl.appendChild(wrap);
+        } else if (def.type === 'color') {
+            const inp = document.createElement('input');
+            inp.type = 'color';
+            inp.className = 'prop-color';
+            inp.value = ppLayer.properties[def.key];
+            inp.addEventListener('input', () => {
+                ppLayer.properties[def.key] = inp.value;
+                savePPLayersToDB();
+            });
+            rowEl.appendChild(inp);
+        }
+
+        panel.appendChild(rowEl);
+    }
+}
+
+// ─────────────────────────────────────────────
 //  Layer UI
 // ─────────────────────────────────────────────
 let selectedObject = null;
+let _gizmoLiveRefresh = null;
 
 function refreshCounters() {
     Array.from(document.getElementsByClassName('layer-item'))
@@ -370,6 +565,7 @@ function addLayerElement(layer) {
 
 function selectLayer(layer) {
     selectedObject = null;
+    builder.detachGizmo();
 
     document.querySelectorAll('.layer-item').forEach(el => {
         el.classList.toggle('selected', el.dataset.layerId === layer.id);
@@ -498,6 +694,7 @@ function selectObject(obj, layer) {
         el.classList.toggle('selected', el.dataset.objectId === obj.id);
     });
 
+    builder.attachGizmo(obj, saveLayersToDB, () => _gizmoLiveRefresh?.());
     renderObjectProperties(obj, layer);
 }
 
@@ -516,6 +713,10 @@ function renderObjectProperties(obj, layer) {
 
     let currentSection = null; // content div of the active section
 
+    const objectName = document.createElement("div");
+    objectName.classList.add('h2');
+    objectName.textContent = obj.name;
+    panel.appendChild(objectName);
     // Helper: collapsible section header
     function section(title) {
         const h = document.createElement('div');
@@ -810,6 +1011,12 @@ function renderObjectProperties(obj, layer) {
         maxRow.appendChild(maxLbl); maxRow.appendChild(maxWrap);
         audioSection.appendChild(maxRow);
 
+        container.refreshFromBinding = () => {
+            if (binding.mode === 'constant') {
+                cSlider.value = binding.value;
+                cNum.value    = binding.value;
+            }
+        };
         return container;
     }
 
@@ -820,19 +1027,24 @@ function renderObjectProperties(obj, layer) {
 
     // ── Transform bindings ──────────────────────
     section('Position');
-    bindingPanel('Position X', obj.posX);
-    bindingPanel('Position Y', obj.posY);
-    bindingPanel('Position Z', obj.posZ);
+    const _pPosX = bindingPanel('Position X', obj.posX);
+    const _pPosY = bindingPanel('Position Y', obj.posY);
+    const _pPosZ = bindingPanel('Position Z', obj.posZ);
 
     section('Rotation');
-    bindingPanel('Rotation X', obj.rotX);
-    bindingPanel('Rotation Y', obj.rotY);
-    bindingPanel('Rotation Z', obj.rotZ);
+    const _pRotX = bindingPanel('Rotation X', obj.rotX);
+    const _pRotY = bindingPanel('Rotation Y', obj.rotY);
+    const _pRotZ = bindingPanel('Rotation Z', obj.rotZ);
 
     section('Scale');
-    bindingPanel('Scale X', obj.scaleX);
-    bindingPanel('Scale Y', obj.scaleY);
-    bindingPanel('Scale Z', obj.scaleZ);
+    const _pScaleX = bindingPanel('Scale X', obj.scaleX);
+    const _pScaleY = bindingPanel('Scale Y', obj.scaleY);
+    const _pScaleZ = bindingPanel('Scale Z', obj.scaleZ);
+
+    _gizmoLiveRefresh = () => {
+        [_pPosX, _pPosY, _pPosZ, _pRotX, _pRotY, _pRotZ, _pScaleX, _pScaleY, _pScaleZ]
+            .forEach(p => p.refreshFromBinding());
+    };
 
     // ── Model-specific ──────────────────────────
     if (obj.type === 'model') {
@@ -1168,7 +1380,41 @@ window.addEventListener('load', async () => {
 
     if (builder.layers.length > 0) selectLayer(builder.layers[0]);
     if (allFiles.length > 0) loadAudioFromRecord(allFiles[0]);
+
+    // ── Post-processing setup ──────────────────────────
+    await initShaders();
+    pipeline = new PostProcessingPipeline(
+        builder.renderer, window.innerWidth, window.innerHeight
+    );
+    builder.setPostPipeline(pipeline);
+
+    const savedPP = await loadPPLayersFromDB();
+    ppLayers = savedPP.map(d => PostProcessingLayer.fromJSON(d));
+    pipeline.layers = ppLayers;
+    renderPPLayerList();
+
+    // Tab switching
+    document.getElementById('oe-btn').addEventListener('click',   () => switchTab('oe'));
+    document.getElementById('pp-editor').addEventListener('click', () => switchTab('pp'));
+
+    // Add PP layer popup
+    document.getElementById('add-pp-layer').addEventListener('click', () => {
+        const shaderKeys  = Object.keys(PP_SHADER_REGISTRY);
+        const shaderNames = shaderKeys.map(k => PP_SHADER_REGISTRY[k].name);
+        spawnPopup('Add Post FX', [
+            ['Effect', 'select', shaderNames],
+        ]).then(data => {
+            const key   = shaderKeys[shaderNames.indexOf(data['Effect'])];
+            const layer = new PostProcessingLayer(key);
+            ppLayers.push(layer);
+            pipeline.layers = ppLayers;
+            renderPPLayerList();
+            savePPLayersToDB();
+        }).catch(() => {});
+    });
 });
+
+
 
 // ─────────────────────────────────────────────
 //  Animation loop
