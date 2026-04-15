@@ -86,14 +86,7 @@ header .h2 {
 }
 
 #file-open, #file-save {
-    background-size: cover;
-    background-repeat: no-repeat;
-    background-position: center;
-    width: 18px;
-    height: 18px;
-    opacity: 0.5;
-    cursor: pointer;
-    transition: opacity 0.15s;
+
 }
 #file-open:hover, #file-save:hover { opacity: 1; }
 
@@ -133,7 +126,22 @@ header .h2 {
     transition: width 0.1s linear;
 }
 
-#current-time { padding-left: 12px; }
+#playback-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+}
+
+#pause-btn {
+    color: var(--accent);
+    font-size: 0.85rem;
+    cursor: pointer;
+    flex-shrink: 0;
+    user-select: none;
+    line-height: 1;
+}
+#pause-btn:hover { filter: brightness(1.4); }
 
 #track-name {
     position: absolute;
@@ -216,20 +224,15 @@ header .h2 {
     white-space: nowrap;
 }
 
-#player > label {
-    padding: 6px 10px;
-    font-size: 0.68rem;
-    color: var(--text-dim);
+#player-controls {
     display: flex;
-    flex-direction: column;
-    align-items: center;
     gap: 4px;
-    font-family: var(--font-mono);
+    padding: 6px 8px 2px;
+    justify-content: center;
     border-top: 1px solid var(--border);
     margin-top: 4px;
+    flex-wrap: wrap;
 }
-
-input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
 
 /* ════════════════════════════════════════════════════════════════
    TYPOGRAPHY
@@ -282,6 +285,58 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
     border-color: var(--accent);
     border-left: 3px solid var(--accent);
     color: #fff;
+}
+
+/* ════════════════════════════════════════════════════════════════
+   PREVIEW GRID
+   ════════════════════════════════════════════════════════════════ */
+.preview-grid {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: space-evenly;
+}
+
+.preview-item {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-lift);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    padding:4px;
+    margin:4px;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.preview-item:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-bright);
+}
+
+.preview-item.selected {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+}
+
+.preview-img {
+    width: 10vh;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: var(--radius);
+    display: block;
+    background: var(--bg-hover);
+}
+
+.preview-label {
+    margin-top: 3px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-mono);
+    font-size: 0.58rem;
+    color: var(--text);
 }
 
 /* ════════════════════════════════════════════════════════════════
@@ -379,7 +434,8 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
     height: 2px;
 }
 
-#current-layer-controls {
+#current-layer-controls,
+#pp-section {
     padding: 6px 0;
     border-top: 1px solid var(--border);
 }
@@ -506,7 +562,7 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
     text-align: center;
 }
 
-.popup-input-box {
+.popup-input-box:not(.preview-grid){
     flex: 1;
     overflow-y: auto;
     display: flex;
@@ -515,7 +571,7 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
     padding: 8px 0;
 }
 
-.popup-input-box div {
+.popup-input-box > div:not(.preview-grid):not(.preview-field) {
     display: flex;
     flex-direction: row;
     align-items: center;
@@ -523,6 +579,14 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
     padding: 6px 16px;
     border-bottom: 1px solid var(--border);
     gap: 12px;
+}
+
+.popup-input-box > .preview-field {
+    display: flex;
+    flex-direction: column;
+    padding: 6px 16px 8px;
+    border-bottom: 1px solid var(--border);
+    gap: 6px;
 }
 
 .popup-input-box .h2 {
@@ -767,18 +831,14 @@ input[type="file"] { width: 90px; font-size: 0.62rem; color: var(--text-dim); }
 /* ════════════════════════════════════════════════════════════════
    POST PROCESSING PANEL
    ════════════════════════════════════════════════════════════════ */
-#pp-layer-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 5px 10px;
-    margin-top: 4px;
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-    background: rgba(255,255,255,0.02);
-}
 
-#add-pp-layer { background-image: url('Graphics/plus-svgrepo-com.svg'); }
+#pp-top-buttons {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 8px 2px;
+}
 
 #pp-layer-list {
     display: flex;

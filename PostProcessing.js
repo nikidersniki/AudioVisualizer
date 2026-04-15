@@ -85,28 +85,28 @@ export const PP_SHADER_REGISTRY = {
         fragmentPath: './shaders/pixelart.glsl',
         _vertSrc: null,
         _fragSrc: null,
-        defaultProperties: { ditherIntensity: 1.0, pixelSize: 4, paletteMode: 1, globalMix: 1.0 },
+        defaultProperties: { ditherIntensity: 1.0, pixelSize: 4, colorLevels: 8, globalMix: 1.0 },
         propertyDefs: [
             { key: 'ditherIntensity', label: 'Dither Intensity', type: 'slider', min: 0,   max: 3,  step: 0.01 },
             { key: 'pixelSize',       label: 'Pixel Size',       type: 'slider', min: 1,   max: 16, step: 1    },
-            { key: 'paletteMode',     label: 'Palette',          type: 'slider', min: 0,   max: 2,  step: 1    },
+            { key: 'colorLevels',     label: 'Colors',           type: 'slider', min: 2,   max: 32, step: 1    },
             { key: 'globalMix',       label: 'Mix',              type: 'slider', min: 0,   max: 1,  step: 0.01 },
         ],
         buildUniforms(props, w, h) {
             return {
-                tDiffuse:        { value: null },
-                iResolution:     { value: new Vector2(w, h) },
-                uDitherIntensity:{ value: props.ditherIntensity },
-                uPixelSize:      { value: props.pixelSize },
-                uPaletteMode:    { value: props.paletteMode },
-                uGlobalMix:      { value: props.globalMix },
+                tDiffuse:         { value: null },
+                iResolution:      { value: new Vector2(w, h) },
+                uDitherIntensity: { value: props.ditherIntensity },
+                uPixelSize:       { value: props.pixelSize },
+                uColorLevels:     { value: props.colorLevels },
+                uGlobalMix:       { value: props.globalMix },
             };
         },
         updateUniforms(u, props, _time, w, h) {
             u.iResolution.value.set(w, h);
             u.uDitherIntensity.value = props.ditherIntensity;
             u.uPixelSize.value       = props.pixelSize;
-            u.uPaletteMode.value     = props.paletteMode;
+            u.uColorLevels.value     = props.colorLevels;
             u.uGlobalMix.value       = props.globalMix;
         },
     },
@@ -140,6 +140,36 @@ export const PP_SHADER_REGISTRY = {
             u.uDisplace.value  = props.displace;
             u.uColor0.value.set(props.color0);
             u.uColor1.value.set(props.color1);
+        },
+    },
+
+    hsv: {
+        name:         'Hue / Saturation / Value',
+        vertexPath:   './shaders/vertex.glsl',
+        fragmentPath: './shaders/hsv.glsl',
+        _vertSrc: null,
+        _fragSrc: null,
+        defaultProperties: { hue: 0.0, saturation: 1.0, value: 1.0, fac: 1.0 },
+        propertyDefs: [
+            { key: 'hue',        label: 'Hue',        type: 'slider', min: -0.5, max: 0.5, step: 0.01 },
+            { key: 'saturation', label: 'Saturation',  type: 'slider', min: 0,    max: 2,   step: 0.01 },
+            { key: 'value',      label: 'Value',       type: 'slider', min: 0,    max: 2,   step: 0.01 },
+            { key: 'fac',        label: 'Factor',      type: 'slider', min: 0,    max: 1,   step: 0.01 },
+        ],
+        buildUniforms(props) {
+            return {
+                tDiffuse:     { value: null },
+                uHue:         { value: props.hue },
+                uSaturation:  { value: props.saturation },
+                uValue:       { value: props.value },
+                uFac:         { value: props.fac },
+            };
+        },
+        updateUniforms(u, props) {
+            u.uHue.value        = props.hue;
+            u.uSaturation.value = props.saturation;
+            u.uValue.value      = props.value;
+            u.uFac.value        = props.fac;
         },
     },
 
@@ -386,7 +416,9 @@ export class PostProcessingPipeline {
         }
     }
 
-    apply(inputTarget, time) {
+    // finalTarget: if provided, the last pass outputs here instead of to screen.
+    // Used by per-layer PP so the result can be composited rather than shown directly.
+    apply(inputTarget, time, finalTarget = null) {
         const deltaTime = this._lastTime === undefined ? 0.016 : (time - this._lastTime) / 1000;
         this._lastTime  = time;
 
@@ -395,7 +427,7 @@ export class PostProcessingPipeline {
         if (active.length === 0) {
             this._copyMat.uniforms.tDiffuse.value = inputTarget.texture;
             this._quad.material = this._copyMat;
-            this.renderer.setRenderTarget(null);
+            this.renderer.setRenderTarget(finalTarget);
             this.renderer.render(this._scene, this._cam);
             return;
         }
@@ -413,15 +445,32 @@ export class PostProcessingPipeline {
                 if (!pass) continue;
                 const reg = PP_NATIVE_REGISTRY[layer.passType];
                 reg?.update(pass, layer.properties, this.width, this.height);
-                pass.renderToScreen = isLast;
-                const dst = isLast ? null : pingpong[ppIdx];
-                pass.render(this.renderer, dst, srcTarget, deltaTime, false);
-                // UnrealBloomPass (and any pass with writesToReadBuffer) blends its output
-                // back onto readBuffer in-place rather than writing to writeBuffer.
-                // srcTarget already contains the result — do NOT advance to dst.
-                if (!isLast && !reg?.writesToReadBuffer) {
-                    srcTarget = dst;
-                    ppIdx = 1 - ppIdx;
+
+                if (isLast && finalTarget === null) {
+                    // Normal path: render to screen
+                    pass.renderToScreen = true;
+                    pass.render(this.renderer, null, srcTarget, deltaTime, false);
+                } else if (isLast) {
+                    // Redirect last pass to finalTarget
+                    pass.renderToScreen = false;
+                    if (reg?.writesToReadBuffer) {
+                        pass.render(this.renderer, pingpong[ppIdx], srcTarget, deltaTime, false);
+                        // srcTarget was modified in-place; copy it to finalTarget
+                        this._copyMat.uniforms.tDiffuse.value = srcTarget.texture;
+                        this._quad.material = this._copyMat;
+                        this.renderer.setRenderTarget(finalTarget);
+                        this.renderer.render(this._scene, this._cam);
+                    } else {
+                        pass.render(this.renderer, finalTarget, srcTarget, deltaTime, false);
+                    }
+                } else {
+                    pass.renderToScreen = false;
+                    const dst = pingpong[ppIdx];
+                    pass.render(this.renderer, dst, srcTarget, deltaTime, false);
+                    if (!reg?.writesToReadBuffer) {
+                        srcTarget = dst;
+                        ppIdx = 1 - ppIdx;
+                    }
                 }
                 continue;
             }
@@ -436,7 +485,7 @@ export class PostProcessingPipeline {
             this._quad.material = mat;
 
             if (isLast) {
-                this.renderer.setRenderTarget(null);
+                this.renderer.setRenderTarget(finalTarget);
                 this.renderer.render(this._scene, this._cam);
             } else {
                 const dst = pingpong[ppIdx];

@@ -5,7 +5,7 @@ import {
 import { SceneBuilder, PRESETS}    from './SceneBuilder.js';
 import { Layer, ModelObject, PointLightObject, WaveObject, PropertyBinding} from './Sceneobjects.js';
 import { PP_SHADER_REGISTRY, PP_NATIVE_REGISTRY, PostProcessingLayer, PostProcessingPipeline, NativePassLayer, initShaders } from './PostProcessing.js';
-
+import {generateMaterialPreviews, generateModelPreviews} from './PreviewRenderer.js';
 // ─────────────────────────────────────────────
 //  Scene
 // ─────────────────────────────────────────────
@@ -24,8 +24,8 @@ let audioBuffer = null;
 let audioContext = null;
 let audioSource  = null;
 let startTime    = 0;
-let pauseTime    = 0;
-let isPlaying    = false;
+let pauseTime        = 0;
+let isPlaying        = false;
 let isDragging   = false;
 let Volume       = 1;
 
@@ -88,19 +88,97 @@ async function loadLayersFromDB() {
 }
 
 async function savePPLayersToDB() {
-    const db = await openDB();
-    const tx = db.transaction(LAYERS_STORE, 'readwrite');
-    tx.objectStore(LAYERS_STORE).put({ id: 'ppLayers', layers: ppLayers.map(l => l.toJSON()) });
+    const ctx = getPPContext();
+    if (!ctx) return;
+    const key = ppContextId === 'global' ? 'ppLayers' : 'pp-layers-' + ppContextId;
+    const db  = await openDB();
+    const tx  = db.transaction(LAYERS_STORE, 'readwrite');
+    tx.objectStore(LAYERS_STORE).put({ id: key, layers: ctx.layers.map(l => l.toJSON()) });
     return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
 }
 
-async function loadPPLayersFromDB() {
+async function loadPPLayersFromDB(key = 'ppLayers') {
     const db = await openDB();
     const tx = db.transaction(LAYERS_STORE, 'readonly');
     return new Promise((res, rej) => {
-        const req = tx.objectStore(LAYERS_STORE).get('ppLayers');
+        const req = tx.objectStore(LAYERS_STORE).get(key);
         req.onsuccess = () => res(req.result?.layers ?? []);
         req.onerror   = () => rej(req.error);
+    });
+}
+
+// ─────────────────────────────────────────────
+//  Save/Load Layer Files
+// ─────────────────────────────────────────────
+function downloadLayersToFile(Name) {
+    console.log(Name);
+    const data = builder.toJSON();
+
+    const json = JSON.stringify(data, null, 2); // pretty format
+    const blob = new Blob([json], { type: "application/json" });
+
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = Name + ".json"; // filename
+    document.body.appendChild(a);
+    a.click();
+
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+
+document.getElementById('file-save').addEventListener('click', ()=>{
+    spawnPopup("Save Project", [['Name','text']])
+            .then(data => {
+                const {
+                    Name
+                } = data;
+                downloadLayersToFile(Name);
+            })
+            .catch(() => {});
+    
+});
+const fileInput = document.getElementById('file-input');
+
+document.getElementById('file-open').addEventListener('click', () => {
+    fileInput.click();
+});
+
+// When user selects a file
+fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    await loadLayersFromFile(file);
+
+    // allow re-selecting same file later
+    fileInput.value = "";
+});
+
+async function loadLayersFromFile(file) {
+    return new Promise((res, rej) => {
+        const reader = new FileReader();
+
+        reader.onload = async () => {
+            try {
+                const data = JSON.parse(reader.result);
+
+                if (data) {
+                    await builder.loadFromJSON(data); // ✅ correct method
+                    await saveLayersToDB();           // auto-save after load
+                }
+
+                res(data);
+            } catch (err) {
+                rej(err);
+            }
+        };
+
+        reader.onerror = () => rej(reader.error);
+        reader.readAsText(file);
     });
 }
 
@@ -127,13 +205,44 @@ function applyAudioBuffer(buffer) {
     sound.play();
 }
 
+function setCurrentTrack(name) {
+    document.querySelectorAll('#saved-tracks .list-button').forEach(btn =>
+        btn.classList.toggle('selected', btn.dataset.trackName === name)
+    );
+}
+
+function updatePauseBtn() {
+    const btn = document.getElementById('pause-btn');
+    if (btn) btn.textContent = isPlaying ? '⏸' : '▶';
+}
+
+function pauseAudio() {
+    if (!isPlaying || !audioContext || !audioBuffer) return;
+    const currentTime = audioSource
+        ? audioContext.currentTime - startTime + pauseTime
+        : audioContext.currentTime - startTime;
+    pauseTime = Math.max(0, currentTime);
+    if (audioSource) { try { audioSource.stop(); } catch (_) {} audioSource = null; }
+    else sound.stop();
+    isPlaying = false;
+    updatePauseBtn();
+}
+
+function resumeAudio() {
+    if (isPlaying || !audioBuffer || !audioContext) return;
+    playAudioFromTime(pauseTime/2);
+    updatePauseBtn();
+}
+
 function loadAudioFromRecord(record) {
     const reader = new FileReader();
     reader.onload = async (e) => {
         audioContext = listener.context;
         const decoded = await audioContext.decodeAudioData(e.target.result);
         document.getElementById('track-name').textContent = record.name;
+        setCurrentTrack(record.name);
         applyAudioBuffer(decoded);
+        updatePauseBtn();
     };
     reader.readAsArrayBuffer(record.file);
 }
@@ -178,6 +287,8 @@ function spawnPopup(title, popupFields) {
             const [text, type, required] = element;
             let input = document.createElement("input");
             input.id = "popup-input-" + index;
+            let extraElement = null;
+
             if (type == "select"){
                 input = document.createElement("select");
                 element[2].forEach(element => {
@@ -187,11 +298,28 @@ function spawnPopup(title, popupFields) {
                     z.appendChild(t);
                     input.appendChild(z);
                 });
-                input.id = "popup-input-" + index;            }
+                input.id = "popup-input-" + index;
+            }
+            else if (type === 'preview') {
+                const previewType = required; // 'model' or 'material'
+                const defaultVal  = previewType === 'model'
+                    ? PRESETS.MODEL_CATALOGUE[0]?.name
+                    : Object.keys(PRESETS.materials)[0];
+                input = document.createElement('input');
+                input.type  = 'hidden';
+                input.value = defaultVal ?? '';
+                input.id    = 'popup-input-' + index;
+                const _extraCallbacks = [];
+                input._extraCallbacks = _extraCallbacks;
+                extraElement = createPreviewArea(previewType, defaultVal, name => {
+                    input.value = name;
+                    _extraCallbacks.forEach(fn => fn(name));
+                });
+            }
             else if (type === "color") {
                 input = document.createElement("input");
                 input.type = "color";
-                input.value = "#ffffff"; // default white
+                input.value = "#ffffff";
             }
             else{
                 input.type = type;
@@ -202,13 +330,26 @@ function spawnPopup(title, popupFields) {
             nameField.textContent = text;
 
             const box = document.createElement('div');
+            if (extraElement) box.classList.add('preview-field');
             box.appendChild(nameField);
             box.appendChild(input);
+            if (extraElement) box.appendChild(extraElement);
 
             inputBox.appendChild(box);
 
             inputs.push({ input, type, required, label: text });
         });
+
+        // Model preview -> auto-fill Name input
+        const modelEntry = inputs.find(i => i.label === 'Model' && i.type === 'preview');
+        const nameEntry  = inputs.find(i => i.label === 'Name'  && i.type === 'text');
+        if (modelEntry?.input._extraCallbacks && nameEntry) {
+            nameEntry.input.addEventListener('input', () => { nameEntry.input.dataset.userEdited = '1'; });
+            modelEntry.input._extraCallbacks.push(name => {
+                if (!nameEntry.input.dataset.userEdited) nameEntry.input.value = name;
+            });
+            if (modelEntry.input.value) nameEntry.input.value = modelEntry.input.value;
+        }
 
         const confirm = document.createElement('div');
         confirm.textContent = "Confirm";
@@ -299,20 +440,90 @@ progressBar.addEventListener('click', (e) => {
 
 // ─────────────────────────────────────────────
 //  Post-processing state
+//  ppContexts: Map<'global' | layerId, { layers: [], pipeline: PostProcessingPipeline }>
 // ─────────────────────────────────────────────
-let ppLayers   = [];
-let pipeline   = null;  // PostProcessingPipeline, created after initShaders()
+const ppContexts  = new Map();
+let   ppContextId = 'global';   // which context the PP editor is showing
+
+function getPPContext(id = ppContextId)  { return ppContexts.get(id); }
+function getPPLayers(id = ppContextId)   { return getPPContext(id)?.layers ?? []; }
+function getPPPipeline(id = ppContextId) { return getPPContext(id)?.pipeline ?? null; }
+
+function _deserializePPLayer(d) {
+    if (d.type === 'native') return NativePassLayer.fromJSON(d);
+    if (d.type === 'bloom')  return NativePassLayer.fromJSON({ ...d, type: 'native', passType: 'unrealBloom' });
+    return PostProcessingLayer.fromJSON(d);
+}
 
 // ─────────────────────────────────────────────
 //  Tab switching (Object Editor ↔ Post Processing)
 // ─────────────────────────────────────────────
+let currentTab = 'oe';
+
 function switchTab(tab) {
+    currentTab = tab;
     const isOE = tab === 'oe';
-    document.getElementById('layers').style.display                = isOE ? '' : 'none';
+    // #layers is always visible — it doubles as PP context selector in PP mode
     document.getElementById('current-layer-controls').style.display = isOE ? '' : 'none';
     document.getElementById('pp-section').style.display            = isOE ? 'none' : '';
     document.getElementById('oe-btn').classList.toggle('selected',  isOE);
     document.getElementById('pp-editor').classList.toggle('selected', !isOE);
+    renderLayerList(); // re-render to add/remove Global item and rewire click handlers
+}
+
+// ─────────────────────────────────────────────
+//  PP context selector
+// ─────────────────────────────────────────────
+function addPPLayerHandler() {
+    if (!ppContexts.has(ppContextId)) switchPPContext(ppContextId);
+    const ctx = getPPContext();
+
+    const shaderKeys  = Object.keys(PP_SHADER_REGISTRY);
+    const shaderNames = shaderKeys.map(k => PP_SHADER_REGISTRY[k].name);
+    const nativeKeys  = Object.keys(PP_NATIVE_REGISTRY);
+    const nativeNames = nativeKeys.map(k => PP_NATIVE_REGISTRY[k].name);
+    spawnPopup('Add Post FX', [
+        ['Effect', 'select', [...shaderNames, ...nativeNames]],
+    ]).then(data => {
+        const effectName = data['Effect'];
+        const nativeIdx  = nativeNames.indexOf(effectName);
+        const newLayer = nativeIdx !== -1
+            ? new NativePassLayer(nativeKeys[nativeIdx])
+            : new PostProcessingLayer(shaderKeys[shaderNames.indexOf(effectName)]);
+        ctx.layers.push(newLayer);
+        ctx.pipeline.layers = ctx.layers;
+        if (ppContextId !== 'global') builder.setLayerPPPipeline(ppContextId, ctx.pipeline);
+        renderPPLayerList();
+        savePPLayersToDB();
+    }).catch(() => {});
+}
+
+function switchPPContext(id) {
+    ppContextId = id;
+    if (!ppContexts.has(id)) {
+        const lpp = new PostProcessingPipeline(builder.renderer, window.innerWidth, window.innerHeight);
+        ppContexts.set(id, { layers: [], pipeline: lpp });
+        if (id !== 'global') builder.setLayerPPPipeline(id, lpp);
+    }
+    // Update selection highlight in the layer list without a full re-render
+    document.querySelectorAll('#layer-list .layer-item').forEach(el => {
+        const elId = el.dataset.layerId ?? 'global';
+        el.classList.toggle('selected', elId === id);
+    });
+
+    // Update title and Add Post FX button
+    const title = id === 'global' ? 'Global' : (builder.layers.find(l => l.id === id)?.name ?? id);
+    document.getElementById('pp-context-title').textContent = title;
+    const btnBox = document.getElementById('pp-top-buttons');
+    btnBox.innerHTML = '';
+    const addBtn = document.createElement('div');
+    addBtn.classList.add('Btn');
+    addBtn.textContent = 'Add Post FX';
+    addBtn.addEventListener('click', addPPLayerHandler);
+    btnBox.appendChild(addBtn);
+
+    renderPPLayerList();
+    document.getElementById('pp-layer-properties').innerHTML = '';
 }
 
 // ─────────────────────────────────────────────
@@ -321,10 +532,12 @@ function switchTab(tab) {
 function renderPPLayerList() {
     const container = document.getElementById('pp-layer-list');
     container.innerHTML = '';
-    for (const layer of ppLayers) addPPLayerElement(layer);
+    for (const layer of getPPLayers()) addPPLayerElement(layer);
 }
 
 function addPPLayerElement(ppLayer) {
+    const ctx = getPPContext(); // capture current context at creation time
+
     const el = document.createElement('div');
     el.classList.add('list-button');
     el.style.justifyContent = 'space-between';
@@ -345,10 +558,10 @@ function addPPLayerElement(ppLayer) {
     const upBtn = mkBtn('move-up');
     upBtn.addEventListener('click', e => {
         e.stopPropagation();
-        const idx = ppLayers.indexOf(ppLayer);
+        const idx = ctx.layers.indexOf(ppLayer);
         if (idx > 0) {
-            [ppLayers[idx], ppLayers[idx - 1]] = [ppLayers[idx - 1], ppLayers[idx]];
-            pipeline.layers = ppLayers;
+            [ctx.layers[idx], ctx.layers[idx - 1]] = [ctx.layers[idx - 1], ctx.layers[idx]];
+            ctx.pipeline.layers = ctx.layers;
             renderPPLayerList();
             savePPLayersToDB();
         }
@@ -357,10 +570,10 @@ function addPPLayerElement(ppLayer) {
     const downBtn = mkBtn('move-down');
     downBtn.addEventListener('click', e => {
         e.stopPropagation();
-        const idx = ppLayers.indexOf(ppLayer);
-        if (idx < ppLayers.length - 1) {
-            [ppLayers[idx], ppLayers[idx + 1]] = [ppLayers[idx + 1], ppLayers[idx]];
-            pipeline.layers = ppLayers;
+        const idx = ctx.layers.indexOf(ppLayer);
+        if (idx < ctx.layers.length - 1) {
+            [ctx.layers[idx], ctx.layers[idx + 1]] = [ctx.layers[idx + 1], ctx.layers[idx]];
+            ctx.pipeline.layers = ctx.layers;
             renderPPLayerList();
             savePPLayersToDB();
         }
@@ -369,8 +582,11 @@ function addPPLayerElement(ppLayer) {
     const removeBtn = mkBtn('remove-layer');
     removeBtn.addEventListener('click', e => {
         e.stopPropagation();
-        ppLayers = ppLayers.filter(l => l.id !== ppLayer.id);
-        pipeline.layers = ppLayers;
+        ctx.layers = ctx.layers.filter(l => l.id !== ppLayer.id);
+        ctx.pipeline.layers = ctx.layers;
+        // if last per-layer effect removed, unregister from renderer
+        if (ppContextId !== 'global' && ctx.layers.length === 0)
+            builder.setLayerPPPipeline(ppContextId, null);
         renderPPLayerList();
         document.getElementById('pp-layer-properties').innerHTML = '';
         savePPLayersToDB();
@@ -480,16 +696,33 @@ let selectedObject = null;
 let _gizmoLiveRefresh = null;
 
 function refreshCounters() {
-    Array.from(document.getElementsByClassName('layer-item'))
+    Array.from(document.querySelectorAll('#layer-list .layer-item'))
+        .filter(el => el.dataset.layerId !== 'global')
         .forEach((el, i) => el.querySelector('.layer-count').textContent = i + 1);
 }
 
 function renderLayerList() {
     const container = document.getElementById('layer-list');
     container.innerHTML = '';
-    for (const layer of builder.layers) {
-        addLayerElement(layer);
+
+    if (currentTab === 'pp') {
+        // Global PP button — sits above scene layers, no reorder/remove
+        const globalEl = document.createElement('div');
+        globalEl.classList.add('list-button', 'layer-item');
+        if (ppContextId === 'global') globalEl.classList.add('selected');
+        globalEl.dataset.layerId = 'global';
+
+        const content = document.createElement('div');
+        content.classList.add('layer-content');
+        const name = document.createElement('div');
+        name.textContent = 'Global';
+        content.appendChild(name);
+        globalEl.appendChild(content);
+        globalEl.addEventListener('click', () => switchPPContext('global'));
+        container.appendChild(globalEl);
     }
+
+    for (const layer of builder.layers) addLayerElement(layer);
     refreshCounters();
 }
 
@@ -559,7 +792,10 @@ function addLayerElement(layer) {
         buttonBox.appendChild(downBtn);
     }
 
-    el.addEventListener('click', () => selectLayer(layer));
+    el.addEventListener('click', () => {
+        if (currentTab === 'pp') switchPPContext(layer.id);
+        else selectLayer(layer);
+    });
     document.getElementById('layer-list').appendChild(el);
 }
 
@@ -582,24 +818,16 @@ function selectLayer(layer) {
         addModel.classList.add('Btn');
         addModel.textContent = 'Add Model';
         addModel.addEventListener('click', () => {
-            const availableModels = [];
-            PRESETS.MODEL_CATALOGUE.forEach(element => {
-                availableModels.push(element['name']);
-            });
             spawnPopup('Add Model to Scene', [
-                ['Model', 'select', availableModels],
-                ['Name', 'text'],
-                ['Material', 'select', ["normal", "wireframe", "standard"]],
-                ['Scale Mode', 'select', ["avgFrequency","lowFreq","midFreq","highFreq"]],
-                ['Scale Source', 'select', ["constant","audio"]],
+                ['Name',         'text'],
+                ['Model',        'preview', 'model'],
+                ['Material',     'preview', 'material'],
             ])
             .then(data => {
                 const {
-                    Model, Name, Material,
-                    "Scale Mode": scaleMode,
-                    "Scale Source": scaleSource,
+                    Model, Name, Material
                 } = data;
-                onAddModel(layer, Model, Name, scaleMode, scaleSource, Material);
+                onAddModel(layer, Model, Name, Material);
             })
             .catch(() => {});
         });
@@ -1050,8 +1278,7 @@ function renderObjectProperties(obj, layer) {
     if (obj.type === 'model') {
         section('Model');
 
-        const availableModels = PRESETS.MODEL_CATALOGUE.map(m => m.name);
-        selectInput('Model', availableModels, () => obj.modelName, v => { obj.modelName = v; });
+        currentSection.appendChild(createPreviewArea('model', obj.modelName, v => { obj.modelName = v; save(); }));
 
         section('Material Properties');
 
@@ -1063,17 +1290,14 @@ function renderObjectProperties(obj, layer) {
         const isStandard = () => obj.materialType === 'standard';
         const isNormal   = () => obj.materialType === 'normal';
 
-        selectInput('Material', ['normal','wireframe','standard'],
-            () => obj.materialType,
-            v => {
-                obj.materialType = v;
-                // _updateModel handles the actual material swap via _ownMaterialType check
-                if (opacityRowRef)   opacityRowRef.style.display   = v === 'normal'   ? 'none' : '';
-                if (roughnessRowRef) roughnessRowRef.style.display = v === 'standard' ? '' : 'none';
-                if (metalnessRowRef) metalnessRowRef.style.display = v === 'standard' ? '' : 'none';
-                if (smoothRowRef)    smoothRowRef.style.display    = v === 'normal'   ? 'none' : '';
-            }
-        );
+        currentSection.appendChild(createPreviewArea('material', obj.materialType, v => {
+            obj.materialType = v;
+            if (opacityRowRef)   opacityRowRef.style.display   = v === 'normal'   ? 'none' : '';
+            if (roughnessRowRef) roughnessRowRef.style.display = v === 'standard' ? '' : 'none';
+            if (metalnessRowRef) metalnessRowRef.style.display = v === 'standard' ? '' : 'none';
+            if (smoothRowRef)    smoothRowRef.style.display    = v === 'normal'   ? 'none' : '';
+            save();
+        }));
 
         colorInput('Color', () => obj.color, v => { obj.color = v; });
 
@@ -1169,7 +1393,7 @@ function renderObjectProperties(obj, layer) {
         selectInput('Type',
             ['circular','linear','linear-up','bars','bars-both','line'],
             () => obj.waveType,
-            v  => { obj.waveType = v; save(); }
+            v  => { obj.waveType = v; save(); renderObjectProperties(obj, layer); }
         );
 
         colorInput('Color', () => obj.color, v => { obj.color = v; });
@@ -1245,6 +1469,9 @@ function renderObjectProperties(obj, layer) {
         section('Shape');
         bindingPanel('Width', obj.width, { min: 1, max: 50 });
         bindingPanel('Radius (circular)', obj.radius);
+        if (obj.waveType === 'bars' || obj.waveType === 'bars-both') {
+            bindingPanel('Bar Spacing', obj.barSpacing, { min: 0.001, max: 1, step: 0.001 });
+        }
     }
 }
 
@@ -1270,10 +1497,8 @@ async function duplicateObject(obj, layer) {
 // ─────────────────────────────────────────────
 //  Add object handlers
 // ─────────────────────────────────────────────
-async function onAddModel(layer, model, modelDiplayName, scaleMode, scaleSource, Material) {
+async function onAddModel(layer, model, modelDiplayName, Material) {
     const modelObj = new ModelObject();
-    modelObj.audioScale.source   = scaleMode;
-    modelObj.audioScale.mode     = scaleSource;
     modelObj.audioScale.min      = 0.5;
     modelObj.audioScale.max      = 1.0;
     modelObj.name                = modelDiplayName;
@@ -1314,6 +1539,10 @@ function onAddWave(layer, data) {
 // ─────────────────────────────────────────────
 //  Global controls
 // ─────────────────────────────────────────────
+document.getElementById('pause-btn').addEventListener('click', () => {
+    isPlaying ? pauseAudio() : resumeAudio();
+});
+
 document.getElementById('hide-player').addEventListener('click', () => {
     const ui = document.getElementById('player');
     ui.style.display = ui.style.display === 'none' ? 'block' : 'none';
@@ -1343,16 +1572,59 @@ document.getElementById('audio-file').addEventListener('change', async (e) => {
     await saveAudioFile(file);
 
     const songName = await readID3Title({ file });
+    const name = songName || file.name;
     const lI = document.createElement('div');
     const button = document.createElement('button');
-    button.textContent = songName || file.name;
+    button.textContent = name;
     button.classList.add('list-button');
-    button.onclick = () => loadAudioFromRecord({ file, name: songName || file.name });
+    button.dataset.trackName = name;
+    button.onclick = () => loadAudioFromRecord({ file, name });
     lI.appendChild(button);
     document.getElementById('saved-tracks').appendChild(lI);
 
-    loadAudioFromRecord({ file, name: songName || file.name });
+    loadAudioFromRecord({ file, name });
 });
+// ─────────────────────────────────────────────
+//  PreviewArea
+// ─────────────────────────────────────────────
+let materialPreviews = generateMaterialPreviews();
+let modelPreviews = generateModelPreviews();
+
+function createPreviewArea(type, currentValue, onChange) {
+    const grid = document.createElement('div');
+    grid.className = 'preview-grid';
+
+    const promise = type === 'material' ? materialPreviews : modelPreviews;
+    Promise.resolve(promise).then(items => {
+        items.forEach(({ name, url }) => {
+            const item = document.createElement('div');
+            item.className = 'preview-item';
+            if (name === currentValue) item.classList.add('selected');
+            item.title = name;
+
+            const img = document.createElement(url ? 'img' : 'div');
+            img.className = 'preview-img';
+            if (url) img.src = url;
+            item.appendChild(img);
+
+            const label = document.createElement('div');
+            label.className = 'preview-label';
+            label.textContent = name;
+            item.appendChild(label);
+
+            item.addEventListener('click', () => {
+                grid.querySelectorAll('.preview-item').forEach(el => el.classList.remove('selected'));
+                item.classList.add('selected');
+                onChange(name);
+            });
+
+            grid.appendChild(item);
+        });
+    });
+
+    return grid;
+}
+
 
 // ─────────────────────────────────────────────
 //  Boot
@@ -1361,11 +1633,13 @@ window.addEventListener('load', async () => {
     const allFiles = await loadAllAudioFiles();
     for (const f of allFiles) {
         const songName = await readID3Title(f);
+        const trackName = songName || f.name;
         const lI = document.createElement('div');
         const button = document.createElement('button');
-        button.textContent = songName || f.name;
+        button.textContent = trackName;
         button.classList.add('list-button');
-        button.onclick = () => loadAudioFromRecord(f);
+        button.dataset.trackName = trackName;
+        button.onclick = () => loadAudioFromRecord({ ...f, name: trackName });
         lI.appendChild(button);
         document.getElementById('saved-tracks').appendChild(lI);
     }
@@ -1383,44 +1657,36 @@ window.addEventListener('load', async () => {
 
     // ── Post-processing setup ──────────────────────────
     await initShaders();
-    pipeline = new PostProcessingPipeline(
-        builder.renderer, window.innerWidth, window.innerHeight
-    );
-    builder.setPostPipeline(pipeline);
 
-    const savedPP = await loadPPLayersFromDB();
-    ppLayers = savedPP.map(d => {
-        if (d.type === 'native') return NativePassLayer.fromJSON(d);
-        if (d.type === 'bloom') return NativePassLayer.fromJSON({ ...d, type: 'native', passType: 'unrealBloom' });
-        return PostProcessingLayer.fromJSON(d);
-    });
-    pipeline.layers = ppLayers;
-    renderPPLayerList();
+    // Global PP context
+    const globalPipeline = new PostProcessingPipeline(builder.renderer, window.innerWidth, window.innerHeight);
+    builder.setPostPipeline(globalPipeline);
+    ppContexts.set('global', { layers: [], pipeline: globalPipeline });
+
+    const savedGlobal = await loadPPLayersFromDB('ppLayers');
+    const globalCtx   = ppContexts.get('global');
+    globalCtx.layers  = savedGlobal.map(_deserializePPLayer);
+    globalCtx.pipeline.layers = globalCtx.layers;
+
+    // Per-layer PP contexts (load saved data for existing scene layers)
+    for (const layer of builder.layers) {
+        const saved = await loadPPLayersFromDB('pp-layers-' + layer.id);
+        if (saved.length > 0) {
+            const lpp = new PostProcessingPipeline(builder.renderer, window.innerWidth, window.innerHeight);
+            const layers = saved.map(_deserializePPLayer);
+            lpp.layers = layers;
+            ppContexts.set(layer.id, { layers, pipeline: lpp });
+            builder.setLayerPPPipeline(layer.id, lpp);
+        }
+    }
+
+    renderLayerList();
+    switchPPContext('global'); // sets title, Add Post FX button, renders pp layer list
 
     // Tab switching
     document.getElementById('oe-btn').addEventListener('click',   () => switchTab('oe'));
     document.getElementById('pp-editor').addEventListener('click', () => switchTab('pp'));
 
-    // Add PP layer popup
-    document.getElementById('add-pp-layer').addEventListener('click', () => {
-        const shaderKeys  = Object.keys(PP_SHADER_REGISTRY);
-        const shaderNames = shaderKeys.map(k => PP_SHADER_REGISTRY[k].name);
-        const nativeKeys  = Object.keys(PP_NATIVE_REGISTRY);
-        const nativeNames = nativeKeys.map(k => PP_NATIVE_REGISTRY[k].name);
-        spawnPopup('Add Post FX', [
-            ['Effect', 'select', [...shaderNames, ...nativeNames]],
-        ]).then(data => {
-            const effectName = data['Effect'];
-            const nativeIdx  = nativeNames.indexOf(effectName);
-            const layer = nativeIdx !== -1
-                ? new NativePassLayer(nativeKeys[nativeIdx])
-                : new PostProcessingLayer(shaderKeys[shaderNames.indexOf(effectName)]);
-            ppLayers.push(layer);
-            pipeline.layers = ppLayers;
-            renderPPLayerList();
-            savePPLayersToDB();
-        }).catch(() => {});
-    });
 });
 
 

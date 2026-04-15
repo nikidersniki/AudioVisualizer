@@ -17,8 +17,9 @@
   <body>
     <header>
       <div id="header-buttons">
-        <div id="file-open"></div>
-        <div id="file-save"></div>
+        <input type="file" id="file-input" accept=".json" style="display:none">
+        <div id="file-open" class="Btn">Open File</div>
+        <div id="file-save" class="Btn">Save File</div>
       </div>
       <div class="h2">Revisualize 3D</div>
     </header>
@@ -29,8 +30,11 @@
         <div id="progress-bar">
           <div id="progress-fill"></div>
         </div>
-        <div id="time-display">
-          <span id="current-time">0:00</span> / <span id="duration">0:00</span>
+        <div id="playback-row">
+          <div id="pause-btn">▶</div>
+          <div id="time-display">
+            <span id="current-time">0:00</span> / <span id="duration">0:00</span>
+          </div>
         </div>
       </div>
 
@@ -62,10 +66,8 @@
           <div id="object-properties"></div>
         </div>
         <div id="pp-section" style="display:none">
-          <div id="pp-layer-header">
-            <div class="h2">Post FX</div>
-            <div id="add-pp-layer" class="image-button"></div>
-          </div>
+          <div class="h2" id="pp-context-title">Global</div>
+          <div id="pp-top-buttons"></div>
           <div id="pp-layer-list"></div>
           <div id="pp-layer-properties"></div>
         </div>
@@ -75,7 +77,10 @@
       <div id="player">
         <div class="h1">Saved Tracks</div>
         <div id="saved-tracks"></div>
-        <label>Add Track <input type="file" id="audio-file"></label>
+        <div id="player-controls">
+          <label class="Btn" for="audio-file">Add Track</label>
+          <input type="file" id="audio-file" style="display:none">
+        </div>
       </div>
     </main>
     <footer></footer>

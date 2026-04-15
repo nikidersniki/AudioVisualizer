@@ -1,10 +1,10 @@
 precision highp float;
 
 uniform sampler2D tDiffuse;
-uniform vec2 iResolution;
+uniform vec2  iResolution;
 uniform float uDitherIntensity;
 uniform float uPixelSize;
-uniform float uPaletteMode;
+uniform float uColorLevels;
 uniform float uGlobalMix;
 
 varying vec2 vUv;
@@ -21,59 +21,10 @@ const float bayer8x8[64] = float[](
     63.0, 31.0, 55.0, 23.0, 61.0, 29.0, 53.0, 21.0
 );
 
-vec3 tryColor(vec3 newVal, vec3 currentBest, vec3 ref) {
-    vec3 dNew = newVal - ref;
-    vec3 dOld = currentBest - ref;
-    return dot(dNew, dNew) < dot(dOld, dOld) ? newVal : currentBest;
-}
-
-// Palettes taken from the Pixless camera kickstarter
-// 0: dark-to-warm  |  1: orange-to-neutral  |  2: cool grey
-vec3 findClosestPixless(vec3 ref, float mode) {
-    vec3 best = vec3(25500.0);
-    if (mode < 0.5) {
-        best = tryColor(vec3( 15,  32,  48), best, ref);
-        best = tryColor(vec3( 30,  49,  68), best, ref);
-        best = tryColor(vec3( 88,  79,  99), best, ref);
-        best = tryColor(vec3(142, 110, 123), best, ref);
-        best = tryColor(vec3(211, 139, 102), best, ref);
-        best = tryColor(vec3(255, 168,  91), best, ref);
-        best = tryColor(vec3(255, 217, 181), best, ref);
-        best = tryColor(vec3(255, 241, 225), best, ref);
-    } else if (mode < 1.5) {
-        best = tryColor(vec3(252, 210,  52), best, ref);
-        best = tryColor(vec3(178, 114,  42), best, ref);
-        best = tryColor(vec3( 87,  49,  31), best, ref);
-        best = tryColor(vec3( 41,  24,  18), best, ref);
-        best = tryColor(vec3(192, 131,  98), best, ref);
-        best = tryColor(vec3(113,  89,  87), best, ref);
-        best = tryColor(vec3( 57,  58,  62), best, ref);
-        best = tryColor(vec3( 35,  36,  39), best, ref);
-    } else {
-        best = tryColor(vec3( 13,  13,  18), best, ref);
-        best = tryColor(vec3( 28,  26,  36), best, ref);
-        best = tryColor(vec3( 57,  54,  75), best, ref);
-        best = tryColor(vec3( 88,  86, 113), best, ref);
-        best = tryColor(vec3(133, 130, 156), best, ref);
-        best = tryColor(vec3(176, 175, 196), best, ref);
-        best = tryColor(vec3(208, 206, 222), best, ref);
-        best = tryColor(vec3(234, 235, 242), best, ref);
-    }
-    return best;
-}
-
 float fetchDitherValue(vec2 pos) {
     int x = int(pos.x) % 8;
     int y = int(pos.y) % 8;
     return bayer8x8[y * 8 + x];
-}
-
-vec3 applyRetroDither(vec3 screenColor, vec2 emuCoord, float intensity) {
-    float ditherVal = fetchDitherValue(emuCoord);
-    vec3 color = screenColor * 255.0;
-    color = color * 0.95 * intensity;
-    color += (ditherVal - 31.5) * 0.65;
-    return color;
 }
 
 void main() {
@@ -82,10 +33,18 @@ void main() {
     vec2 emuCoord   = floor(fragCoord / pixelScale);
     vec2 uv         = (emuCoord * pixelScale + pixelScale * 0.5) / iResolution;
 
-    vec3 screen   = texture(tDiffuse, uv).rgb;
-    vec3 dithered = applyRetroDither(screen, emuCoord, uDitherIntensity);
-    vec3 colorPix = findClosestPixless(clamp(dithered, 0.0, 255.0), uPaletteMode) / 255.0;
-    vec3 orig     = texture(tDiffuse, vUv).rgb;
+    vec3 screen = texture(tDiffuse, uv).rgb;
+    vec3 orig   = texture(tDiffuse, vUv).rgb;
 
-    gl_FragColor = vec4(mix(orig, colorPix, uGlobalMix), 1.0);
+    // Bayer threshold normalised to [-0.5, 0.5], scaled by intensity
+    float t = (fetchDitherValue(emuCoord) / 63.0 - 0.5) * uDitherIntensity;
+
+    // Quantise to uColorLevels levels per channel.
+    // Dither noise is one quantisation step wide so it pushes borderline
+    // colours to the next level rather than always rounding down.
+    float L = max(floor(uColorLevels), 2.0) - 1.0;
+    vec3 dithered  = screen + t / L;
+    vec3 quantized = clamp(floor(dithered * L + 0.5) / L, 0.0, 1.0);
+
+    gl_FragColor = vec4(mix(orig, quantized, uGlobalMix), 1.0);
 }

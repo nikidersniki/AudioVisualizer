@@ -61,7 +61,9 @@ export class SceneBuilder {
             this.renderer.setSize(this.width, this.height);
             this._layerTargets.forEach(t => t.setSize(this.width, this.height));
             this._finalTarget.setSize(this.width, this.height);
+            this._layerPPTarget.setSize(this.width, this.height);
             this._postPipeline?.resize(this.width, this.height);
+            this._layerPPPipelines.forEach(p => p.resize(this.width, this.height));
         });
 
         new EXRLoader().load('./Graphics/pond_bridge_night_1k.exr', (tex) => {
@@ -108,8 +110,12 @@ export class SceneBuilder {
         };
 
         // ── Final composite target + PP pipeline hook ──
-        this._finalTarget  = new WebGLRenderTarget(this.width, this.height);
-        this._postPipeline = null;
+        this._finalTarget    = new WebGLRenderTarget(this.width, this.height);
+        this._postPipeline   = null;
+
+        // ── Per-layer PP pipelines ─────────────────────
+        this._layerPPPipelines = new Map(); // layerId → PostProcessingPipeline
+        this._layerPPTarget    = new WebGLRenderTarget(this.width, this.height); // scratch for per-layer PP output
 
         // ── Gizmo overlay (TransformControls) ─────────
         this._gizmoScene = new Scene();
@@ -146,6 +152,7 @@ export class SceneBuilder {
         this._layerScenes.delete(id);
         this._layerTargets.get(id)?.dispose();
         this._layerTargets.delete(id);
+        this._layerPPPipelines.delete(id);
         this.layers = this.layers.filter(l => l.id !== id);
     }
 
@@ -155,6 +162,11 @@ export class SceneBuilder {
     //  Post-processing pipeline
     // ─────────────────────────────────────────
     setPostPipeline(pipeline) { this._postPipeline = pipeline; }
+
+    setLayerPPPipeline(layerId, pipeline) {
+        if (pipeline) this._layerPPPipelines.set(layerId, pipeline);
+        else          this._layerPPPipelines.delete(layerId);
+    }
 
     // ─────────────────────────────────────────
     //  Gizmo (TransformControls)
@@ -319,6 +331,7 @@ export class SceneBuilder {
         const amplitude   = waveObj.amplitude.resolve(ad);
         const width       = waveObj.width.resolve(ad);
         const radius      = waveObj.radius.resolve(ad);
+        const barSpacing  = waveObj.barSpacing?.resolve ? waveObj.barSpacing.resolve(ad) : (waveObj.barSpacing ?? 0.05);
         const sampleCount = Math.max(1, Math.min(waveObj.sampleCount ?? freqData.length, freqData.length));
         const arr         = three._arr;
 
@@ -369,7 +382,7 @@ export class SceneBuilder {
 
             case 'bars':
                 for (let i = 0; i < N; i++) {
-                    const x = (N > 1 ? i / (N-1) - 0.5 : 0) * width;
+                    const x = (i - (N - 1) * 0.5) * barSpacing;
                     const h = (freqData[ptBin(i, N)] / 255) * amplitude;
                     arr[i*6]   = x; arr[i*6+1] = 0;  arr[i*6+2] = 0;
                     arr[i*6+3] = x; arr[i*6+4] = h;  arr[i*6+5] = 0;
@@ -378,7 +391,7 @@ export class SceneBuilder {
 
             case 'bars-both':
                 for (let i = 0; i < N; i++) {
-                    const x = (N > 1 ? i / (N-1) - 0.5 : 0) * width;
+                    const x = (i - (N - 1) * 0.5) * barSpacing;
                     const h = (freqData[ptBin(i, N)] / 255) * amplitude;
                     arr[i*6]   = x; arr[i*6+1] = -h; arr[i*6+2] = 0;
                     arr[i*6+3] = x; arr[i*6+4] =  h; arr[i*6+5] = 0;
@@ -496,13 +509,24 @@ export class SceneBuilder {
             const target = this._layerTargets.get(layer.id);
             if (!scene || !target) continue;
 
+            // Render layer scene
             this.renderer.setRenderTarget(target);
             this.renderer.setClearColor(0x000000, 0);
             this.renderer.clear();
             this.renderer.render(scene, this.camera);
 
+            // Apply per-layer PP if any effects are active
+            const layerPP = this._layerPPPipelines.get(layer.id);
+            const hasLayerPP = layerPP?.layers.some(l => l.visible);
+            let compositeSource = target;
+            if (hasLayerPP) {
+                layerPP.apply(target, time, this._layerPPTarget);
+                compositeSource = this._layerPPTarget;
+            }
+
+            // Composite into final target
             this.renderer.setRenderTarget(this._finalTarget);
-            this._compositeQuad.material.map     = target.texture;
+            this._compositeQuad.material.map     = compositeSource.texture;
             this._compositeQuad.material.opacity = layer.opacity ?? 1;
             this._compositeQuad.material.needsUpdate = true;
             this.renderer.render(this._compositeScene, this._compositeCamera);
