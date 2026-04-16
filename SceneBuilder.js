@@ -682,6 +682,7 @@ export class SceneBuilder {
         });
         this._layerScenes.clear();
         this._layerTargets.clear();
+        this._layerPPPipelines.clear();
         this.layers = [];
 
         const promises = [];

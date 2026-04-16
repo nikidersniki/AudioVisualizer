@@ -18,5 +18,6 @@ void main() {
         total += weight;
     }
 
-    gl_FragColor = color / total;
+    vec4 result  = color / total;
+    gl_FragColor = vec4(result.rgb * result.a, result.a);
 }

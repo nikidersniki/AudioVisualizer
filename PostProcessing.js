@@ -8,7 +8,6 @@ import { UnrealBloomPass } from './modules/three.js/examples/jsm/postprocessing/
 import { AfterimagePass }  from './modules/three.js/examples/jsm/postprocessing/AfterimagePass.js';
 import { FilmPass }        from './modules/three.js/examples/jsm/postprocessing/FilmPass.js';
 import { GlitchPass }      from './modules/three.js/examples/jsm/postprocessing/GlitchPass.js';
-import { DotScreenPass }   from './modules/three.js/examples/jsm/postprocessing/DotScreenPass.js';
 import { OutputPass }      from './modules/three.js/examples/jsm/postprocessing/OutputPass.js';
 
 // ── Noise texture (loaded once) ───────────────────────────────
@@ -117,12 +116,13 @@ export const PP_SHADER_REGISTRY = {
         fragmentPath: './shaders/sinethresholder.glsl',
         _vertSrc: null,
         _fragSrc: null,
-        defaultProperties: { frequency: 10, displace: 40, color0: '#000000', color1: '#ffffff' },
+        defaultProperties: { frequency: 10, displace: 40, color0: '#000000', color1: '#ffffff', keepColors: true },
         propertyDefs: [
-            { key: 'frequency', label: 'Frequency', type: 'slider', min: 1, max: 100, step: 0.1 },
-            { key: 'displace',  label: 'Displace',  type: 'slider', min: 0, max: 200, step: 0.1 },
-            { key: 'color0',    label: 'Color A',   type: 'color' },
-            { key: 'color1',    label: 'Color B',   type: 'color' },
+            { key: 'frequency',  label: 'Frequency',   type: 'slider',   min: 1, max: 100, step: 0.1 },
+            { key: 'displace',   label: 'Displace',    type: 'slider',   min: 0, max: 200, step: 0.1 },
+            { key: 'color0',     label: 'Color A',     type: 'color' },
+            { key: 'color1',     label: 'Color B',     type: 'color' },
+            { key: 'keepColors', label: 'Keep Colors', type: 'checkbox' },
         ],
         buildUniforms(props, w, h) {
             return {
@@ -132,29 +132,32 @@ export const PP_SHADER_REGISTRY = {
                 uDisplace:   { value: props.displace },
                 uColor0:     { value: new Color(props.color0) },
                 uColor1:     { value: new Color(props.color1) },
+                uKeepColors: { value: props.keepColors ? 1.0 : 0.0 },
             };
         },
         updateUniforms(u, props, _time, w, h) {
             u.iResolution.value.set(w, h);
-            u.uFrequency.value = props.frequency;
-            u.uDisplace.value  = props.displace;
+            u.uFrequency.value  = props.frequency;
+            u.uDisplace.value   = props.displace;
             u.uColor0.value.set(props.color0);
             u.uColor1.value.set(props.color1);
+            u.uKeepColors.value = props.keepColors ? 1.0 : 0.0;
         },
     },
 
     hsv: {
-        name:         'Hue / Saturation / Value',
+        name:         'Hue / Saturation / Color',
         vertexPath:   './shaders/vertex.glsl',
         fragmentPath: './shaders/hsv.glsl',
         _vertSrc: null,
         _fragSrc: null,
-        defaultProperties: { hue: 0.0, saturation: 1.0, value: 1.0, fac: 1.0 },
+        defaultProperties: { hue: 0.0, saturation: 1.0, value: 1.0, fac: 1.0, color: '#ffffff' },
         propertyDefs: [
             { key: 'hue',        label: 'Hue',        type: 'slider', min: -0.5, max: 0.5, step: 0.01 },
             { key: 'saturation', label: 'Saturation',  type: 'slider', min: 0,    max: 2,   step: 0.01 },
             { key: 'value',      label: 'Value',       type: 'slider', min: 0,    max: 2,   step: 0.01 },
             { key: 'fac',        label: 'Factor',      type: 'slider', min: 0,    max: 1,   step: 0.01 },
+            { key: 'color',      label: 'Color',       type: 'color' },
         ],
         buildUniforms(props) {
             return {
@@ -163,6 +166,7 @@ export const PP_SHADER_REGISTRY = {
                 uSaturation:  { value: props.saturation },
                 uValue:       { value: props.value },
                 uFac:         { value: props.fac },
+                uColor:       { value: new Color(props.color) },
             };
         },
         updateUniforms(u, props) {
@@ -170,6 +174,53 @@ export const PP_SHADER_REGISTRY = {
             u.uSaturation.value = props.saturation;
             u.uValue.value      = props.value;
             u.uFac.value        = props.fac;
+            u.uColor.value.set(props.color);
+        },
+    },
+
+    colorRamp: {
+        name:         'Color Ramp',
+        vertexPath:   './shaders/vertex.glsl',
+        fragmentPath: './shaders/colorramp.glsl',
+        _vertSrc: null,
+        _fragSrc: null,
+        defaultProperties: {
+            color0: '#000000', pos1: 0.25, color1: '#555555',
+            pos2: 0.5, color2: '#aaaaaa', pos3: 0.75, color3: '#ffffff',
+            fac: 1.0,
+        },
+        propertyDefs: [
+            { key: 'color0', label: 'Color 1',    type: 'color' },
+            { key: 'pos1',   label: 'Pos 2',      type: 'slider', min: 0, max: 1, step: 0.01 },
+            { key: 'color1', label: 'Color 2',    type: 'color' },
+            { key: 'pos2',   label: 'Pos 3',      type: 'slider', min: 0, max: 1, step: 0.01 },
+            { key: 'color2', label: 'Color 3',    type: 'color' },
+            { key: 'pos3',   label: 'Pos 4',      type: 'slider', min: 0, max: 1, step: 0.01 },
+            { key: 'color3', label: 'Color 4',    type: 'color' },
+            { key: 'fac',    label: 'Factor',     type: 'slider', min: 0, max: 1, step: 0.01 },
+        ],
+        buildUniforms(props) {
+            return {
+                tDiffuse: { value: null },
+                uPos1:    { value: props.pos1 },
+                uPos2:    { value: props.pos2 },
+                uPos3:    { value: props.pos3 },
+                uColor0:  { value: new Color(props.color0) },
+                uColor1:  { value: new Color(props.color1) },
+                uColor2:  { value: new Color(props.color2) },
+                uColor3:  { value: new Color(props.color3) },
+                uFac:     { value: props.fac },
+            };
+        },
+        updateUniforms(u, props) {
+            u.uPos1.value     = props.pos1;
+            u.uPos2.value     = props.pos2;
+            u.uPos3.value     = props.pos3;
+            u.uColor0.value.set(props.color0);
+            u.uColor1.value.set(props.color1);
+            u.uColor2.value.set(props.color2);
+            u.uColor3.value.set(props.color3);
+            u.uFac.value      = props.fac;
         },
     },
 
@@ -195,6 +246,35 @@ export const PP_SHADER_REGISTRY = {
             u.iResolution.value.set(w, h);
             u.uTexelSize.value.set(1 / w, 1 / h);
             u.uRadius.value = props.radius;
+        },
+    },
+
+    dotScreen: {
+        name:         'Dot Screen',
+        vertexPath:   './shaders/vertex.glsl',
+        fragmentPath: './shaders/dotscreen.glsl',
+        _vertSrc: null,
+        _fragSrc: null,
+        defaultProperties: { angle: 0.5, scale: 1.0, keepColors: true },
+        propertyDefs: [
+            { key: 'angle',      label: 'Angle',       type: 'slider',   min: 0, max: 3.14, step: 0.01 },
+            { key: 'scale',      label: 'Scale',       type: 'slider',   min: 0.1, max: 10, step: 0.1  },
+            { key: 'keepColors', label: 'Keep Colors', type: 'checkbox' },
+        ],
+        buildUniforms(props, w, h) {
+            return {
+                tDiffuse:    { value: null },
+                iResolution: { value: new Vector2(w, h) },
+                uAngle:      { value: props.angle },
+                uScale:      { value: props.scale },
+                uKeepColors: { value: props.keepColors ? 1.0 : 0.0 },
+            };
+        },
+        updateUniforms(u, props, _time, w, h) {
+            u.iResolution.value.set(w, h);
+            u.uAngle.value      = props.angle;
+            u.uScale.value      = props.scale;
+            u.uKeepColors.value = props.keepColors ? 1.0 : 0.0;
         },
     },
 };
@@ -272,20 +352,6 @@ export const PP_NATIVE_REGISTRY = {
         ],
         create: () => new GlitchPass(),
         update: (pass, props) => { pass.goWild = props.goWild; },
-    },
-
-    dotScreen: {
-        name: 'Dot Screen',
-        defaultProperties: { angle: 0.5, scale: 1.0 },
-        propertyDefs: [
-            { key: 'angle', label: 'Angle', type: 'slider', min: 0,   max: 3.14, step: 0.01 },
-            { key: 'scale', label: 'Scale', type: 'slider', min: 0.1, max: 10,   step: 0.1  },
-        ],
-        create: (_w, _h, p) => new DotScreenPass(undefined, p.angle, p.scale),
-        update(pass, props) {
-            pass.uniforms['angle'].value = props.angle;
-            pass.uniforms['scale'].value = props.scale;
-        },
     },
 
     output: {

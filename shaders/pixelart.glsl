@@ -46,5 +46,6 @@ void main() {
     vec3 dithered  = screen + t / L;
     vec3 quantized = clamp(floor(dithered * L + 0.5) / L, 0.0, 1.0);
 
-    gl_FragColor = vec4(mix(orig, quantized, uGlobalMix), 1.0);
+    float origAlpha = texture2D(tDiffuse, vUv).a;
+    gl_FragColor = vec4(mix(orig, quantized, uGlobalMix) * origAlpha, origAlpha);
 }

@@ -16,7 +16,7 @@ void main() {
     // Laplacian kernel: 0,-1,0 / -1,4,-1 / 0,-1,0
     vec4 sum = -s1 - s3 + 4.0 * s4 - s5 - s7;
     sum *= uIntensity;
-    sum.a = 1.0;
 
-    gl_FragColor = sum;
+    float origAlpha = s4.a;
+    gl_FragColor = vec4(clamp(sum.rgb, 0.0, 1.0) * origAlpha, origAlpha);
 }

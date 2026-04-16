@@ -5,7 +5,7 @@ import {
 import { SceneBuilder, PRESETS}    from './SceneBuilder.js';
 import { Layer, ModelObject, PointLightObject, WaveObject, PropertyBinding} from './Sceneobjects.js';
 import { PP_SHADER_REGISTRY, PP_NATIVE_REGISTRY, PostProcessingLayer, PostProcessingPipeline, NativePassLayer, initShaders } from './PostProcessing.js';
-import {generateMaterialPreviews, generateModelPreviews} from './PreviewRenderer.js';
+import {generateMaterialPreviews, generateModelPreviews, generatePPPreviews} from './PreviewRenderer.js';
 // ─────────────────────────────────────────────
 //  Scene
 // ─────────────────────────────────────────────
@@ -70,14 +70,60 @@ async function loadAllAudioFiles() {
     });
 }
 
-async function saveLayersToDB() {
+// ─────────────────────────────────────────────
+//  Unified serialization
+// ─────────────────────────────────────────────
+function serializeAll() {
+    const globalPPLayers = (ppContexts.get('global')?.layers ?? []).map(l => l.toJSON());
+    const sceneLayers = builder.layers.map(layer => ({
+        ...layer.toJSON(),
+        ppLayers: (ppContexts.get(layer.id)?.layers ?? []).map(l => l.toJSON()),
+    }));
+    return [
+        { id: 'global', name: 'Global', isGlobal: true, objects: [], ppLayers: globalPPLayers },
+        ...sceneLayers,
+    ];
+}
+
+async function deserializeAll(data) {
+    const globalEntry = data.find(d => d.isGlobal);
+    const sceneLayers = data.filter(d => !d.isGlobal);
+
+    // Clear per-layer PP contexts
+    for (const id of ppContexts.keys()) {
+        if (id !== 'global') ppContexts.delete(id);
+    }
+
+    await builder.loadFromJSON(sceneLayers);
+
+    // Restore global PP
+    const globalCtx = ppContexts.get('global');
+    if (globalCtx && globalEntry?.ppLayers?.length) {
+        globalCtx.layers = globalEntry.ppLayers.map(_deserializePPLayer);
+        globalCtx.pipeline.layers = globalCtx.layers;
+    }
+
+    // Restore per-layer PP
+    for (const layer of builder.layers) {
+        const ld = sceneLayers.find(d => d.id === layer.id);
+        if (ld?.ppLayers?.length > 0) {
+            const lpp = new PostProcessingPipeline(builder.renderer, window.innerWidth, window.innerHeight);
+            const layers = ld.ppLayers.map(_deserializePPLayer);
+            lpp.layers = layers;
+            ppContexts.set(layer.id, { layers, pipeline: lpp });
+            builder.setLayerPPPipeline(layer.id, lpp);
+        }
+    }
+}
+
+async function saveAllToDB() {
     const db = await openDB();
     const tx = db.transaction(LAYERS_STORE, 'readwrite');
-    tx.objectStore(LAYERS_STORE).put({ id: 'current', layers: builder.toJSON() });
+    tx.objectStore(LAYERS_STORE).put({ id: 'current', layers: serializeAll() });
     return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
 }
 
-async function loadLayersFromDB() {
+async function loadAllFromDB() {
     const db = await openDB();
     const tx = db.transaction(LAYERS_STORE, 'readonly');
     return new Promise((res, rej) => {
@@ -87,32 +133,11 @@ async function loadLayersFromDB() {
     });
 }
 
-async function savePPLayersToDB() {
-    const ctx = getPPContext();
-    if (!ctx) return;
-    const key = ppContextId === 'global' ? 'ppLayers' : 'pp-layers-' + ppContextId;
-    const db  = await openDB();
-    const tx  = db.transaction(LAYERS_STORE, 'readwrite');
-    tx.objectStore(LAYERS_STORE).put({ id: key, layers: ctx.layers.map(l => l.toJSON()) });
-    return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
-}
-
-async function loadPPLayersFromDB(key = 'ppLayers') {
-    const db = await openDB();
-    const tx = db.transaction(LAYERS_STORE, 'readonly');
-    return new Promise((res, rej) => {
-        const req = tx.objectStore(LAYERS_STORE).get(key);
-        req.onsuccess = () => res(req.result?.layers ?? []);
-        req.onerror   = () => rej(req.error);
-    });
-}
-
 // ─────────────────────────────────────────────
 //  Save/Load Layer Files
 // ─────────────────────────────────────────────
 function downloadLayersToFile(Name) {
-    console.log(Name);
-    const data = builder.toJSON();
+    const data = serializeAll();
 
     const json = JSON.stringify(data, null, 2); // pretty format
     const blob = new Blob([json], { type: "application/json" });
@@ -165,12 +190,13 @@ async function loadLayersFromFile(file) {
         reader.onload = async () => {
             try {
                 const data = JSON.parse(reader.result);
-
                 if (data) {
-                    await builder.loadFromJSON(data); // ✅ correct method
-                    await saveLayersToDB();           // auto-save after load
+                    await deserializeAll(data);
+                    renderLayerList();
+                    switchPPContext('global');
+                    if (builder.layers.length > 0) selectLayer(builder.layers[0]);
+                    await saveAllToDB();
                 }
-
                 res(data);
             } catch (err) {
                 rej(err);
@@ -301,9 +327,11 @@ function spawnPopup(title, popupFields) {
                 input.id = "popup-input-" + index;
             }
             else if (type === 'preview') {
-                const previewType = required; // 'model' or 'material'
+                const previewType = required; // 'model', 'material', or 'pp'
                 const defaultVal  = previewType === 'model'
                     ? PRESETS.MODEL_CATALOGUE[0]?.name
+                    : previewType === 'pp'
+                    ? Object.values(PP_SHADER_REGISTRY)[0]?.name
                     : Object.keys(PRESETS.materials)[0];
                 input = document.createElement('input');
                 input.type  = 'hidden';
@@ -483,7 +511,7 @@ function addPPLayerHandler() {
     const nativeKeys  = Object.keys(PP_NATIVE_REGISTRY);
     const nativeNames = nativeKeys.map(k => PP_NATIVE_REGISTRY[k].name);
     spawnPopup('Add Post FX', [
-        ['Effect', 'select', [...shaderNames, ...nativeNames]],
+        ['Effect', 'preview', 'pp'],
     ]).then(data => {
         const effectName = data['Effect'];
         const nativeIdx  = nativeNames.indexOf(effectName);
@@ -494,7 +522,7 @@ function addPPLayerHandler() {
         ctx.pipeline.layers = ctx.layers;
         if (ppContextId !== 'global') builder.setLayerPPPipeline(ppContextId, ctx.pipeline);
         renderPPLayerList();
-        savePPLayersToDB();
+        saveAllToDB();
     }).catch(() => {});
 }
 
@@ -563,7 +591,7 @@ function addPPLayerElement(ppLayer) {
             [ctx.layers[idx], ctx.layers[idx - 1]] = [ctx.layers[idx - 1], ctx.layers[idx]];
             ctx.pipeline.layers = ctx.layers;
             renderPPLayerList();
-            savePPLayersToDB();
+            saveAllToDB();
         }
     });
 
@@ -575,7 +603,7 @@ function addPPLayerElement(ppLayer) {
             [ctx.layers[idx], ctx.layers[idx + 1]] = [ctx.layers[idx + 1], ctx.layers[idx]];
             ctx.pipeline.layers = ctx.layers;
             renderPPLayerList();
-            savePPLayersToDB();
+            saveAllToDB();
         }
     });
 
@@ -589,7 +617,7 @@ function addPPLayerElement(ppLayer) {
             builder.setLayerPPPipeline(ppContextId, null);
         renderPPLayerList();
         document.getElementById('pp-layer-properties').innerHTML = '';
-        savePPLayersToDB();
+        saveAllToDB();
     });
 
     btnGroup.appendChild(removeBtn);
@@ -636,7 +664,7 @@ function renderPPLayerProperties(ppLayer) {
             inp.addEventListener('change', () => {
                 ppLayer.properties[def.key] = inp.checked;
                 ppLayer.invalidateMaterial?.();
-                savePPLayersToDB();
+                saveAllToDB();
             });
             rowEl.appendChild(inp);
         } else if (def.type === 'slider') {
@@ -661,13 +689,13 @@ function renderPPLayerProperties(ppLayer) {
                 ppLayer.properties[def.key] = parseFloat(slider.value);
                 num.value = ppLayer.properties[def.key];
                 ppLayer.invalidateMaterial?.();
-                savePPLayersToDB();
+                saveAllToDB();
             });
             num.addEventListener('input', () => {
                 ppLayer.properties[def.key] = parseFloat(num.value);
                 slider.value = ppLayer.properties[def.key];
                 ppLayer.invalidateMaterial?.();
-                savePPLayersToDB();
+                saveAllToDB();
             });
 
             wrap.appendChild(slider);
@@ -680,7 +708,7 @@ function renderPPLayerProperties(ppLayer) {
             inp.value = ppLayer.properties[def.key];
             inp.addEventListener('input', () => {
                 ppLayer.properties[def.key] = inp.value;
-                savePPLayersToDB();
+                saveAllToDB();
             });
             rowEl.appendChild(inp);
         }
@@ -763,7 +791,7 @@ function addLayerElement(layer) {
                 [builder.layers[idx], builder.layers[idx-1]] =
                 [builder.layers[idx-1], builder.layers[idx]];
                 renderLayerList();
-                saveLayersToDB();
+                saveAllToDB();
             }
         });
 
@@ -775,7 +803,7 @@ function addLayerElement(layer) {
                 [builder.layers[idx], builder.layers[idx+1]] =
                 [builder.layers[idx+1], builder.layers[idx]];
                 renderLayerList();
-                saveLayersToDB();
+                saveAllToDB();
             }
         });
 
@@ -784,7 +812,7 @@ function addLayerElement(layer) {
             e.stopPropagation();
             builder.removeLayer(layer.id);
             renderLayerList();
-            saveLayersToDB();
+            saveAllToDB();
         });
 
         buttonBox.appendChild(removeBtn);
@@ -898,7 +926,7 @@ function renderObjectList(layer) {
             }
             builder.removeObjectFromLayer(layer.id, obj.id);
             renderObjectList(layer);
-            saveLayersToDB();
+            saveAllToDB();
         });
 
         const btnGroup = document.createElement('div');
@@ -922,7 +950,7 @@ function selectObject(obj, layer) {
         el.classList.toggle('selected', el.dataset.objectId === obj.id);
     });
 
-    builder.attachGizmo(obj, saveLayersToDB, () => _gizmoLiveRefresh?.());
+    builder.attachGizmo(obj, saveAllToDB, () => _gizmoLiveRefresh?.());
     renderObjectProperties(obj, layer);
 }
 
@@ -937,7 +965,7 @@ function renderObjectProperties(obj, layer) {
     const panel = document.getElementById('object-properties');
     panel.innerHTML = '';
 
-    const save = () => saveLayersToDB();
+    const save = () => saveAllToDB();
 
     let currentSection = null; // content div of the active section
 
@@ -1491,7 +1519,7 @@ async function duplicateObject(obj, layer) {
         builder.addWaveToLayer(layer.id, newObj);
     }
     renderObjectList(layer);
-    saveLayersToDB();
+    saveAllToDB();
 }
 
 // ─────────────────────────────────────────────
@@ -1506,7 +1534,7 @@ async function onAddModel(layer, model, modelDiplayName, Material) {
     modelObj.materialType        = Material;
     await builder.addModelToLayer(layer.id, modelObj);
     renderObjectList(layer);
-    saveLayersToDB();
+    saveAllToDB();
 }
 
 function onAddLight(layer) {
@@ -1518,7 +1546,7 @@ function onAddLight(layer) {
 
     builder.addLightToLayer(layer.id, lightObj);
     renderObjectList(layer);
-    saveLayersToDB();
+    saveAllToDB();
 }
 
 function onAddWave(layer, data) {
@@ -1533,7 +1561,7 @@ function onAddWave(layer, data) {
     waveObj.amplitude.max   = 1;
     builder.addWaveToLayer(layer.id, waveObj);
     renderObjectList(layer);
-    saveLayersToDB();
+    saveAllToDB();
 }
 
 // ─────────────────────────────────────────────
@@ -1563,7 +1591,7 @@ document.getElementById('add-layer').addEventListener('click', async () => {
     builder.addLayer(layer);
     addLayerElement(layer);
     refreshCounters();
-    await saveLayersToDB();
+    await saveAllToDB();
 });
 
 document.getElementById('audio-file').addEventListener('change', async (e) => {
@@ -1588,13 +1616,16 @@ document.getElementById('audio-file').addEventListener('change', async (e) => {
 //  PreviewArea
 // ─────────────────────────────────────────────
 let materialPreviews = generateMaterialPreviews();
-let modelPreviews = generateModelPreviews();
+let modelPreviews    = generateModelPreviews();
+let ppPreviews;
 
 function createPreviewArea(type, currentValue, onChange) {
     const grid = document.createElement('div');
     grid.className = 'preview-grid';
 
-    const promise = type === 'material' ? materialPreviews : modelPreviews;
+    const promise = type === 'material' ? materialPreviews
+                  : type === 'model'    ? modelPreviews
+                  : ppPreviews;
     Promise.resolve(promise).then(items => {
         items.forEach(({ name, url }) => {
             const item = document.createElement('div');
@@ -1644,44 +1675,24 @@ window.addEventListener('load', async () => {
         document.getElementById('saved-tracks').appendChild(lI);
     }
 
-    const savedLayers = await loadLayersFromDB();
-    if (savedLayers && savedLayers.length > 0) {
-        await builder.loadFromJSON(savedLayers);
-    } else {
-        builder.addLayer(new Layer('Background', true));
-    }
-    renderLayerList();
-
-    if (builder.layers.length > 0) selectLayer(builder.layers[0]);
-    if (allFiles.length > 0) loadAudioFromRecord(allFiles[0]);
-
-    // ── Post-processing setup ──────────────────────────
+    // ── Post-processing setup (must precede deserializeAll) ──
     await initShaders();
-
-    // Global PP context
+    ppPreviews = generatePPPreviews();
     const globalPipeline = new PostProcessingPipeline(builder.renderer, window.innerWidth, window.innerHeight);
     builder.setPostPipeline(globalPipeline);
     ppContexts.set('global', { layers: [], pipeline: globalPipeline });
 
-    const savedGlobal = await loadPPLayersFromDB('ppLayers');
-    const globalCtx   = ppContexts.get('global');
-    globalCtx.layers  = savedGlobal.map(_deserializePPLayer);
-    globalCtx.pipeline.layers = globalCtx.layers;
-
-    // Per-layer PP contexts (load saved data for existing scene layers)
-    for (const layer of builder.layers) {
-        const saved = await loadPPLayersFromDB('pp-layers-' + layer.id);
-        if (saved.length > 0) {
-            const lpp = new PostProcessingPipeline(builder.renderer, window.innerWidth, window.innerHeight);
-            const layers = saved.map(_deserializePPLayer);
-            lpp.layers = layers;
-            ppContexts.set(layer.id, { layers, pipeline: lpp });
-            builder.setLayerPPPipeline(layer.id, lpp);
-        }
+    const saved = await loadAllFromDB();
+    if (saved?.length > 0) {
+        await deserializeAll(saved);
+    } else {
+        builder.addLayer(new Layer('Background', true));
     }
-
     renderLayerList();
-    switchPPContext('global'); // sets title, Add Post FX button, renders pp layer list
+    switchPPContext('global');
+
+    if (builder.layers.length > 0) selectLayer(builder.layers[0]);
+    if (allFiles.length > 0) loadAudioFromRecord(allFiles[0]);
 
     // Tab switching
     document.getElementById('oe-btn').addEventListener('click',   () => switchTab('oe'));

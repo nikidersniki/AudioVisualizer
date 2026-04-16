@@ -3,6 +3,7 @@ uniform float uHue;
 uniform float uSaturation;
 uniform float uValue;
 uniform float uFac;
+uniform vec3  uColor;
 
 varying vec2 vUv;
 
@@ -44,6 +45,7 @@ void main() {
     hsv.y = clamp(hsv.y * uSaturation, 0.0, 1.0);
     hsv.z = clamp(hsv.z * uValue,      0.0, 1.0);
 
-    vec3 result = hsv2rgb(hsv);
-    gl_FragColor = vec4(mix(texel.rgb, result, uFac), texel.a);
+    vec3 result  = hsv2rgb(hsv);
+    vec3 out_rgb = mix(texel.rgb, result, uFac) * uColor;
+    gl_FragColor = vec4(out_rgb * texel.a, texel.a);
 }

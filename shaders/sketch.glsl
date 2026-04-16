@@ -81,5 +81,6 @@ void main() {
         res *= 0.25 + 0.75 * pow(16.0 * q.x * q.y * (1.0 - q.x) * (1.0 - q.y), 0.15);
     }
 
-    gl_FragColor = vec4(res, 1.0);
+    float origAlpha = texture2D(tDiffuse, q).a;
+    gl_FragColor = vec4(res * origAlpha, origAlpha);
 }

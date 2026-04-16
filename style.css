@@ -217,11 +217,50 @@ header .h2 {
     accent-color: var(--accent);
     cursor: pointer;
 }
-#editorSwitch{
-    display:flex;
-    justify-content: space-between;
-    padding:0px;
+#editorSwitch {
+    position: relative;
+    display: flex;
+    margin: 6px 8px;
+    padding: 2px;
+    background: var(--bg-lift);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
     white-space: nowrap;
+}
+
+#editor-switch-pill {
+    position: absolute;
+    top: 2px; bottom: 2px;
+    left: 2px;
+    width: calc(50% - 2px);
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    transition: left 0.18s ease;
+    pointer-events: none;
+}
+
+#editorSwitch:has(#pp-editor.selected) #editor-switch-pill {
+    left: 50%;
+}
+
+.switch-tab {
+    flex: 1;
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 5px 8px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    color: var(--text-dim);
+    border-radius: var(--radius);
+    transition: color 0.18s;
+    user-select: none;
+}
+
+.switch-tab.selected {
+    color: var(--accent);
 }
 
 #player-controls {
@@ -823,9 +862,6 @@ header .h2 {
     background: var(--bg-hover);
     color: var(--text);
     border-color: var(--border-bright);
-}
-#oe-btn, #pp-editor {
-    justify-content: center;
 }
 
 /* ════════════════════════════════════════════════════════════════
