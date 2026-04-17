@@ -95,7 +95,8 @@ function serializeAll() {
         ppLayers: (ppContexts.get(layer.id)?.layers ?? []).map(l => l.toJSON()),
     }));
     return [
-        { id: 'global', name: 'Global', isGlobal: true, objects: [], ppLayers: globalPPLayers },
+        { id: 'global', name: 'Global', isGlobal: true, objects: [], ppLayers: globalPPLayers,
+          bgColor: builder._bgColor, hdri: builder.selectedHDRI },
         ...sceneLayers,
     ];
 }
@@ -110,6 +111,18 @@ async function deserializeAll(data) {
     }
 
     await builder.loadFromJSON(sceneLayers);
+
+    // Restore scene settings
+    if (globalEntry?.bgColor) {
+        builder.setClearColor(globalEntry.bgColor);
+        const el = document.getElementById('scene-clear-color');
+        if (el) el.value = globalEntry.bgColor;
+    }
+    if (globalEntry?.hdri) {
+        builder.setHDRI(globalEntry.hdri);
+        const el = document.getElementById('scene-hdri');
+        if (el) el.value = globalEntry.hdri;
+    }
 
     // Restore global PP
     const globalCtx = ppContexts.get('global');
@@ -1818,6 +1831,7 @@ window.addEventListener('load', async () => {
     });
     document.getElementById('scene-clear-color').addEventListener('input', e => {
         builder.setClearColor(e.target.value);
+        saveAllToDB();
     });
     const hdriSelect = document.getElementById('scene-hdri');
     PRESETS.HDRI_CATALOGUE.forEach(e => {
@@ -1826,7 +1840,7 @@ window.addEventListener('load', async () => {
         hdriSelect.appendChild(o);
     });
     hdriSelect.value = builder.selectedHDRI;
-    hdriSelect.addEventListener('change', () => builder.setHDRI(hdriSelect.value));
+    hdriSelect.addEventListener('change', () => { builder.setHDRI(hdriSelect.value); saveAllToDB(); });
 
     // ── Post-processing setup (must precede deserializeAll) ──
     await initShaders();
