@@ -3,7 +3,7 @@ import {
 } from './modules/three.js/build/three.module.js';
 
 import { SceneBuilder, PRESETS}    from './SceneBuilder.js';
-import { Layer, ModelObject, PointLightObject, WaveObject, PropertyBinding} from './Sceneobjects.js';
+import { Layer, ModelObject, PointLightObject, WaveObject, FillObject, PropertyBinding} from './Sceneobjects.js';
 import { PP_SHADER_REGISTRY, PP_NATIVE_REGISTRY, PostProcessingLayer, PostProcessingPipeline, NativePassLayer, initShaders } from './PostProcessing.js';
 import {generateMaterialPreviews, generateModelPreviews, generatePPPreviews} from './PreviewRenderer.js';
 // ─────────────────────────────────────────────
@@ -24,10 +24,12 @@ let audioBuffer = null;
 let audioContext = null;
 let audioSource  = null;
 let startTime    = 0;
-let pauseTime        = 0;
-let isPlaying        = false;
+let pauseTime    = 0;
+let isPlaying    = false;
 let isDragging   = false;
 let Volume       = 1;
+let allTracks    = [];   // { id, file, name, ... } in display order
+let currentTrackId = null;
 
 // ─────────────────────────────────────────────
 //  IndexedDB
@@ -52,12 +54,25 @@ function openDB() {
 }
 
 async function saveAudioFile(file) {
-    const db    = await openDB();
-    const tx    = db.transaction(STORE_NAME, 'readwrite');
-    tx.objectStore(STORE_NAME).put({
-        id: Date.now() + '_' + file.name, file, name: file.name, type: file.type
+    const id = Date.now() + '_' + file.name;
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).put({ id, file, name: file.name, type: file.type, isPlaying: false });
+    return new Promise((res, rej) => { tx.oncomplete = () => res(id); tx.onerror = rej; });
+}
+
+async function setPlayingTrackById(id) {
+    if (!id) return;
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    return new Promise((res, rej) => {
+        const req = store.getAll();
+        req.onsuccess = () => {
+            for (const rec of req.result) { rec.isPlaying = rec.id === id; store.put(rec); }
+        };
+        tx.oncomplete = res; tx.onerror = rej;
     });
-    return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
 }
 
 async function loadAllAudioFiles() {
@@ -217,12 +232,13 @@ function formatTime(s) {
 }
 
 function applyAudioBuffer(buffer) {
-    if (sound.isPlaying) sound.stop();
+    if (sound.isPlaying) { sound.onEnded = null; sound.stop(); }
     audioBuffer = buffer;
     audioSource = null;
     sound.setBuffer(buffer);
     sound.setLoop(false);
     sound.setVolume(Volume);
+    sound.onEnded = playNext;
     durationDisplay.textContent = formatTime(buffer.duration);
     audioContext = listener.context;
     startTime = audioContext.currentTime;
@@ -248,9 +264,9 @@ function pauseAudio() {
         ? audioContext.currentTime - startTime + pauseTime
         : audioContext.currentTime - startTime;
     pauseTime = Math.max(0, currentTime);
-    if (audioSource) { try { audioSource.stop(); } catch (_) {} audioSource = null; }
-    else sound.stop();
-    isPlaying = false;
+    isPlaying = false; // set before stop so onEnded guard fires correctly
+    if (audioSource) { audioSource.onended = null; try { audioSource.stop(); } catch (_) {} audioSource = null; }
+    else { sound.onEnded = null; sound.stop(); }
     updatePauseBtn();
 }
 
@@ -261,6 +277,8 @@ function resumeAudio() {
 }
 
 function loadAudioFromRecord(record) {
+    currentTrackId = record.id ?? null;
+    setPlayingTrackById(currentTrackId);
     const reader = new FileReader();
     reader.onload = async (e) => {
         audioContext = listener.context;
@@ -273,16 +291,26 @@ function loadAudioFromRecord(record) {
     reader.readAsArrayBuffer(record.file);
 }
 
-function playAudioFromTime(offsetTime) {
-    sound.stop();
+function playNext() {
+    if (!isPlaying) return; // guard: stopped by user, not natural end
     isPlaying = false;
+    updatePauseBtn();
+    const idx = allTracks.findIndex(t => t.id === currentTrackId);
+    if (idx === -1 || idx >= allTracks.length - 1) return;
+    loadAudioFromRecord(allTracks[idx + 1]);
+}
+
+function playAudioFromTime(offsetTime) {
+    sound.onEnded = null; sound.stop();
+    isPlaying = false; // clear before stopping old source so its onended is a no-op
+    if (audioSource) { audioSource.onended = null; try { audioSource.stop(); } catch(e) {} }
     audioContext = listener.context;
-    if (audioSource) { try { audioSource.stop(); } catch(e) {} }
     audioSource = audioContext.createBufferSource();
     audioSource.buffer = audioBuffer;
     audioSource.loop = false;
     audioSource.connect(analyser.analyser);
     analyser.analyser.connect(listener.getInput());
+    audioSource.onended = playNext;
     startTime = audioContext.currentTime - offsetTime;
     pauseTime = offsetTime;
     isPlaying = true;
@@ -332,6 +360,8 @@ function spawnPopup(title, popupFields) {
                     ? PRESETS.MODEL_CATALOGUE[0]?.name
                     : previewType === 'pp'
                     ? Object.values(PP_SHADER_REGISTRY)[0]?.name
+                    : previewType === 'bg'
+                    ? PRESETS.BG_CATALOGUE[0]?.name
                     : Object.keys(PRESETS.materials)[0];
                 input = document.createElement('input');
                 input.type  = 'hidden';
@@ -827,6 +857,7 @@ function addLayerElement(layer) {
     document.getElementById('layer-list').appendChild(el);
 }
 
+const currentLayerControllBox = document.getElementById('current-layer-controls');
 function selectLayer(layer) {
     selectedObject = null;
     builder.detachGizmo();
@@ -835,7 +866,7 @@ function selectLayer(layer) {
         el.classList.toggle('selected', el.dataset.layerId === layer.id);
     });
 
-    document.getElementById('current-layer-controls').children[0].textContent = layer.name;
+    currentLayerControllBox.children[0].textContent = layer.name;
 
     const buttonBox = document.getElementById('layerTopButtons');
     buttonBox.innerHTML = '';
@@ -884,8 +915,22 @@ function selectLayer(layer) {
         .then(data => onAddWave(layer, data))
         .catch(() => {});
     });
-
     buttonBox.appendChild(addWave);
+
+    if (layer.isBase) {
+        const addImage = document.createElement('div');
+        addImage.classList.add('Btn');
+        addImage.textContent = 'Add Image';
+        addImage.addEventListener('click', () => {
+            spawnPopup('Add Image', [
+                ['Name',  'text'],
+                ['Image', 'preview', 'bg'],
+            ])
+            .then(data => onAddImage(layer, data))
+            .catch(() => {});
+        });
+        buttonBox.appendChild(addImage);
+    }
 
     renderObjectList(layer);
     document.getElementById('object-properties').innerHTML = '';
@@ -950,6 +995,7 @@ function selectObject(obj, layer) {
         el.classList.toggle('selected', el.dataset.objectId === obj.id);
     });
 
+    builder.detachGizmo();
     builder.attachGizmo(obj, saveAllToDB, () => _gizmoLiveRefresh?.());
     renderObjectProperties(obj, layer);
 }
@@ -1066,6 +1112,7 @@ function renderObjectProperties(obj, layer) {
         inp.value = val.startsWith('#') ? val : '#888888';
         inp.addEventListener('input', () => { setter(inp.value); save(); });
         r.appendChild(inp);
+        return r;
     }
 
     // Slider
@@ -1281,7 +1328,7 @@ function renderObjectProperties(obj, layer) {
     textInput('Name', () => obj.name, v => { obj.name = v; renderObjectList(layer); });
     checkbox('Visible', () => obj.visible, v => { obj.visible = v; });
 
-    // ── Transform bindings ──────────────────────
+    // ── Transform bindings ──────────────────────────────────
     section('Position');
     const _pPosX = bindingPanel('Position X', obj.posX);
     const _pPosY = bindingPanel('Position Y', obj.posY);
@@ -1310,24 +1357,50 @@ function renderObjectProperties(obj, layer) {
 
         section('Material Properties');
 
-        let opacityRowRef    = null; // forward refs set after their rows are created
+        // forward refs — assigned below after their rows are created
+        let opacityRowRef    = null;
         let roughnessRowRef  = null;
         let metalnessRowRef  = null;
         let smoothRowRef     = null;
+        let colorRowRef      = null;
+        let crRowRef         = null;
+        let sensitivityRowRef = null;
+        let fbxMapRowRef     = null;
+        let fbxRoughRowRef   = null;
+        let fbxMetalRowRef   = null;
+        let fbxNormalRowRef  = null;
 
         const isStandard = () => obj.materialType === 'standard';
         const isNormal   = () => obj.materialType === 'normal';
 
+        // Centralised visibility sync — all refs may be null when called during init
+        const syncMatVisibility = (type = obj.materialType) => {
+            const std = type === 'standard';
+            const nor = type === 'normal';
+            const hideColor = std && obj.useMapTexture;
+            if (opacityRowRef)    opacityRowRef.style.display    = nor   ? 'none' : '';
+            if (smoothRowRef)     smoothRowRef.style.display     = nor   ? 'none' : '';
+            if (colorRowRef)      colorRowRef.style.display      = hideColor ? 'none' : '';
+            if (crRowRef)         crRowRef.style.display         = hideColor ? 'none' : '';
+            if (sensitivityRowRef) sensitivityRowRef.style.display =
+                (hideColor || !obj.colorReactive) ? 'none' : '';
+            if (fbxMapRowRef)     fbxMapRowRef.style.display     = std   ? '' : 'none';
+            if (fbxRoughRowRef)   fbxRoughRowRef.style.display   = std   ? '' : 'none';
+            if (fbxMetalRowRef)   fbxMetalRowRef.style.display   = std   ? '' : 'none';
+            if (fbxNormalRowRef)  fbxNormalRowRef.style.display  = std   ? '' : 'none';
+            if (roughnessRowRef)  roughnessRowRef.style.display  =
+                std && !obj.useRoughnessMapTexture ? '' : 'none';
+            if (metalnessRowRef)  metalnessRowRef.style.display  =
+                std && !obj.useMetalnessMapTexture ? '' : 'none';
+        };
+
         currentSection.appendChild(createPreviewArea('material', obj.materialType, v => {
             obj.materialType = v;
-            if (opacityRowRef)   opacityRowRef.style.display   = v === 'normal'   ? 'none' : '';
-            if (roughnessRowRef) roughnessRowRef.style.display = v === 'standard' ? '' : 'none';
-            if (metalnessRowRef) metalnessRowRef.style.display = v === 'standard' ? '' : 'none';
-            if (smoothRowRef)    smoothRowRef.style.display    = v === 'normal'   ? 'none' : '';
+            syncMatVisibility(v);
             save();
         }));
 
-        colorInput('Color', () => obj.color, v => { obj.color = v; });
+        colorRowRef = colorInput('Color', () => obj.color, v => { obj.color = v; });
 
         // Color reactive toggle + sensitivity (shown only when reactive)
         const sensitivityRow = document.createElement('div');
@@ -1358,8 +1431,9 @@ function renderObjectProperties(obj, layer) {
         srSliderWrap.appendChild(srSlider); srSliderWrap.appendChild(srNum);
         srWrap.appendChild(srLbl); srWrap.appendChild(srSliderWrap);
         sensitivityRow.appendChild(srWrap);
+        sensitivityRowRef = sensitivityRow;
 
-        const crRow = row('Color Reactive');
+        crRowRef = row('Color Reactive');
         const crInp = document.createElement('input');
         crInp.type = 'checkbox'; crInp.className = 'prop-checkbox';
         crInp.checked = obj.colorReactive;
@@ -1368,14 +1442,39 @@ function renderObjectProperties(obj, layer) {
             sensitivityRow.style.display = obj.colorReactive ? '' : 'none';
             save();
         });
-        crRow.appendChild(crInp);
+        crRowRef.appendChild(crInp);
         (currentSection || panel).appendChild(sensitivityRow);
 
+        // ── FBX texture toggles (standard only) ─────────────────
+        fbxMapRowRef = row('FBX Color Texture');
+        { const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'prop-checkbox';
+          cb.checked = obj.useMapTexture;
+          cb.addEventListener('change', () => { obj.useMapTexture = cb.checked; syncMatVisibility(); save(); });
+          fbxMapRowRef.appendChild(cb); fbxMapRowRef.style.display = isStandard() ? '' : 'none'; }
+
+        fbxRoughRowRef = row('FBX Roughness Texture');
+        { const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'prop-checkbox';
+          cb.checked = obj.useRoughnessMapTexture;
+          cb.addEventListener('change', () => { obj.useRoughnessMapTexture = cb.checked; syncMatVisibility(); save(); });
+          fbxRoughRowRef.appendChild(cb); fbxRoughRowRef.style.display = isStandard() ? '' : 'none'; }
+
+        fbxMetalRowRef = row('FBX Metalness Texture');
+        { const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'prop-checkbox';
+          cb.checked = obj.useMetalnessMapTexture;
+          cb.addEventListener('change', () => { obj.useMetalnessMapTexture = cb.checked; syncMatVisibility(); save(); });
+          fbxMetalRowRef.appendChild(cb); fbxMetalRowRef.style.display = isStandard() ? '' : 'none'; }
+
+        fbxNormalRowRef = row('FBX Normal Map');
+        { const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'prop-checkbox';
+          cb.checked = obj.useNormalMapTexture;
+          cb.addEventListener('change', () => { obj.useNormalMapTexture = cb.checked; syncMatVisibility(); save(); });
+          fbxNormalRowRef.appendChild(cb); fbxNormalRowRef.style.display = isStandard() ? '' : 'none'; }
+
         roughnessRowRef = bindingPanel('Roughness', obj.roughness, { min: 0, max: 1 });
-        roughnessRowRef.style.display = isStandard() ? '' : 'none';
+        roughnessRowRef.style.display = isStandard() && !obj.useRoughnessMapTexture ? '' : 'none';
 
         metalnessRowRef = bindingPanel('Metalness', obj.metalness, { min: 0, max: 1 });
-        metalnessRowRef.style.display = isStandard() ? '' : 'none';
+        metalnessRowRef.style.display = isStandard() && !obj.useMetalnessMapTexture ? '' : 'none';
 
         smoothRowRef = row('Smooth Shading');
         const smoothInp = document.createElement('input');
@@ -1501,6 +1600,21 @@ function renderObjectProperties(obj, layer) {
             bindingPanel('Bar Spacing', obj.barSpacing, { min: 0.001, max: 1, step: 0.001 });
         }
     }
+
+    // ── Image-specific ──────────────────────────
+    if (obj.type === 'image') {
+        section('Image');
+
+        const imgRow = row('Image');
+        imgRow.appendChild(createPreviewArea('bg', obj.imageName, name => {
+            obj.imageName = name; save();
+        }));
+
+        slider('Opacity', 0, 1, 0.01, () => obj.opacity ?? 1, v => { obj.opacity = v; });
+
+        section('Audio Scale');
+        bindingPanel('Audio Scale', obj.audioScale);
+    }
 }
 
 // ─────────────────────────────────────────────
@@ -1517,6 +1631,9 @@ async function duplicateObject(obj, layer) {
     } else if (obj.type === 'wave') {
         const newObj = WaveObject.fromJSON(data);
         builder.addWaveToLayer(layer.id, newObj);
+    } else if (obj.type === 'image') {
+        const newObj = FillObject.fromJSON(data);
+        builder.addImageToLayer(layer.id, newObj);
     }
     renderObjectList(layer);
     saveAllToDB();
@@ -1564,6 +1681,15 @@ function onAddWave(layer, data) {
     saveAllToDB();
 }
 
+function onAddImage(layer, data) {
+    const fillObj     = new FillObject();
+    fillObj.name      = data['Name'] || 'Image';
+    fillObj.imageName = data['Image'] || null;
+    builder.addImageToLayer(layer.id, fillObj);
+    renderObjectList(layer);
+    saveAllToDB();
+}
+
 // ─────────────────────────────────────────────
 //  Global controls
 // ─────────────────────────────────────────────
@@ -1597,20 +1723,23 @@ document.getElementById('add-layer').addEventListener('click', async () => {
 document.getElementById('audio-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    await saveAudioFile(file);
+    const trackId = await saveAudioFile(file);
 
     const songName = await readID3Title({ file });
     const name = songName || file.name;
+    const record = { id: trackId, file, name, type: file.type, isPlaying: false };
+    allTracks.push(record);
+
     const lI = document.createElement('div');
     const button = document.createElement('button');
     button.textContent = name;
     button.classList.add('list-button');
     button.dataset.trackName = name;
-    button.onclick = () => loadAudioFromRecord({ file, name });
+    button.onclick = () => loadAudioFromRecord(record);
     lI.appendChild(button);
     document.getElementById('saved-tracks').appendChild(lI);
 
-    loadAudioFromRecord({ file, name });
+    loadAudioFromRecord(record);
 });
 // ─────────────────────────────────────────────
 //  PreviewArea
@@ -1618,6 +1747,7 @@ document.getElementById('audio-file').addEventListener('change', async (e) => {
 let materialPreviews = generateMaterialPreviews();
 let modelPreviews    = generateModelPreviews();
 let ppPreviews;
+const bgPreviews     = Promise.resolve(PRESETS.BG_CATALOGUE.map(e => ({ name: e.name, url: e.path })));
 
 function createPreviewArea(type, currentValue, onChange) {
     const grid = document.createElement('div');
@@ -1625,6 +1755,7 @@ function createPreviewArea(type, currentValue, onChange) {
 
     const promise = type === 'material' ? materialPreviews
                   : type === 'model'    ? modelPreviews
+                  : type === 'bg'       ? bgPreviews
                   : ppPreviews;
     Promise.resolve(promise).then(items => {
         items.forEach(({ name, url }) => {
@@ -1665,15 +1796,37 @@ window.addEventListener('load', async () => {
     for (const f of allFiles) {
         const songName = await readID3Title(f);
         const trackName = songName || f.name;
+        const record = { ...f, name: trackName };
+        allTracks.push(record);
         const lI = document.createElement('div');
         const button = document.createElement('button');
         button.textContent = trackName;
         button.classList.add('list-button');
         button.dataset.trackName = trackName;
-        button.onclick = () => loadAudioFromRecord({ ...f, name: trackName });
+        button.onclick = () => loadAudioFromRecord(record);
         lI.appendChild(button);
         document.getElementById('saved-tracks').appendChild(lI);
     }
+
+    // ── Scene Settings ────────────────────────────────────────
+    const sceneSettingsHeader = document.getElementById('scene-settings-header');
+    const sceneSettingsBody   = document.getElementById('scene-settings-body');
+    sceneSettingsHeader.addEventListener('click', () => {
+        const open = sceneSettingsBody.style.display !== 'none';
+        sceneSettingsBody.style.display = open ? 'none' : '';
+        sceneSettingsHeader.querySelector('.prop-section-arrow').style.transform = open ? 'rotate(-90deg)' : '';
+    });
+    document.getElementById('scene-clear-color').addEventListener('input', e => {
+        builder.setClearColor(e.target.value);
+    });
+    const hdriSelect = document.getElementById('scene-hdri');
+    PRESETS.HDRI_CATALOGUE.forEach(e => {
+        const o = document.createElement('option');
+        o.value = o.textContent = e.name;
+        hdriSelect.appendChild(o);
+    });
+    hdriSelect.value = builder.selectedHDRI;
+    hdriSelect.addEventListener('change', () => builder.setHDRI(hdriSelect.value));
 
     // ── Post-processing setup (must precede deserializeAll) ──
     await initShaders();
@@ -1692,7 +1845,8 @@ window.addEventListener('load', async () => {
     switchPPContext('global');
 
     if (builder.layers.length > 0) selectLayer(builder.layers[0]);
-    if (allFiles.length > 0) loadAudioFromRecord(allFiles[0]);
+    const lastPlaying = allTracks.find(t => t.isPlaying);
+    if (lastPlaying) loadAudioFromRecord(lastPlaying);
 
     // Tab switching
     document.getElementById('oe-btn').addEventListener('click',   () => switchTab('oe'));

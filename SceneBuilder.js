@@ -18,11 +18,24 @@ import { EXRLoader }     from './modules/three.js/examples/jsm/loaders/EXRLoader
 import { mergeVertices }      from './modules/three.js/examples/jsm/utils/BufferGeometryUtils.js';
 import { TransformControls }  from './modules/three.js/examples/jsm/controls/TransformControls.js';
 
-import { Layer, ModelObject, PointLightObject, WaveObject } from './Sceneobjects.js';
+import { Layer, ModelObject, PointLightObject, WaveObject, FillObject } from './Sceneobjects.js';
 // ─────────────────────────────────────────────
 //  Model catalogue  (add entries here to expand)
 // ─────────────────────────────────────────────
 export class PRESETS{
+    static BG_CATALOGUE = [
+        { name: 'Flare', path: './Graphics/bg/Flare.jpg' },
+        { name: 'Pattern',  path: './Graphics/bg/Pattern.png'  },
+    ];
+
+    static HDRI_CATALOGUE = [
+        { name: 'Pond Bridge Night',  path: './Graphics/hdri/pond_bridge_night_1k.exr'          },
+        { name: 'Industrial Sunset',  path: './Graphics/hdri/industrial_sunset_02_puresky_1k.exr'},
+        { name: 'Misty Pines',        path: './Graphics/hdri/misty_pines_1k.exr'                 },
+        { name: 'Studio',             path: './Graphics/hdri/studio_small_02_1k.exr'             },
+        { name: 'Winter Evening',     path: './Graphics/hdri/winter_evening_1k.exr'              },
+    ];
+
     static MODEL_CATALOGUE = [
         { name: 'duck',       path: './models/duck-plush/source/Duck.fbx', scale: [0.01, 0.01, 0.01] },
         { name: 'eco-sphere', path: './models/EcoSphrere.fbx',             scale: [0.01, 0.01, 0.01] },
@@ -66,14 +79,12 @@ export class SceneBuilder {
             this._layerPPPipelines.forEach(p => p.resize(this.width, this.height));
         });
 
-        new EXRLoader().load('./Graphics/pond_bridge_night_1k.exr', (tex) => {
-            tex.mapping = EquirectangularReflectionMapping;
-            PRESETS.materials.standard.envMap = tex;
-            PRESETS.materials.standard.needsUpdate = true;
-        });
+        this.selectedHDRI = PRESETS.HDRI_CATALOGUE[0].name;
+        this.setHDRI(this.selectedHDRI);
 
         // ── Model cache  (name → Three.js object) ─────
-        this._modelCache = {};
+        this._modelCache       = {};
+        this._modelFBXTextures = {}; // name → { map, roughnessMap, metalnessMap, normalMap }
         this._simplex    = new SimplexNoise();
 
         // ── Layer list & per-layer scenes ─────────────
@@ -98,7 +109,9 @@ export class SceneBuilder {
         );
         this._compositeScene  = new Scene();
         this._compositeScene.add(this._compositeQuad);
-        
+
+        this._bgColor = '#000000'; // scene background / clear color
+
         // ── Audio data (updated externally each frame) ─
         this.audioData = {
             avgFrequency: 0,
@@ -184,14 +197,20 @@ export class SceneBuilder {
             if (obj.rotX.mode === 'constant') obj.rotX.value = t.rotation.x;
             if (obj.rotY.mode === 'constant') obj.rotY.value = t.rotation.y;
             if (obj.rotZ.mode === 'constant') obj.rotZ.value = t.rotation.z;
-            // ModelObject applies scale as: scaleX.value * audioScale * 0.01
-            // Reverse that factor so the stored value stays correct.
+            // Reverse the scale factor so stored value matches what the binding expects.
             if (obj.type === 'model') {
+                // model: mesh scale = scaleX * audioScale * 0.01
                 const as = obj.audioScale.mode === 'constant' ? obj.audioScale.value : 1;
                 const sf = as * 0.01;
                 if (obj.scaleX.mode === 'constant') obj.scaleX.value = t.scale.x / sf;
                 if (obj.scaleY.mode === 'constant') obj.scaleY.value = t.scale.y / sf;
                 if (obj.scaleZ.mode === 'constant') obj.scaleZ.value = t.scale.z / sf;
+            } else if (obj.type === 'image') {
+                // image: mesh scale = scaleX * audioScale
+                const as = obj.audioScale.mode === 'constant' ? obj.audioScale.value : 1;
+                if (obj.scaleX.mode === 'constant') obj.scaleX.value = t.scale.x / as;
+                if (obj.scaleY.mode === 'constant') obj.scaleY.value = t.scale.y / as;
+                if (obj.scaleZ.mode === 'constant') obj.scaleZ.value = t.scale.z / as;
             } else {
                 if (obj.scaleX.mode === 'constant') obj.scaleX.value = t.scale.x;
                 if (obj.scaleY.mode === 'constant') obj.scaleY.value = t.scale.y;
@@ -411,10 +430,73 @@ export class SceneBuilder {
     }
 
     // ─────────────────────────────────────────
+    //  Scene settings
+    // ─────────────────────────────────────────
+    setClearColor(hex) { this._bgColor = hex; }
+
+    // ─────────────────────────────────────────
+    //  Image plane management
+    // ─────────────────────────────────────────
+    addImageToLayer(layerId, fillObj) {
+        const layer = this.getLayer(layerId);
+        if (!layer) return;
+        layer.addObject(fillObj);
+        const mat  = new MeshBasicMaterial({ transparent: true });
+        fillObj.threeObject = new Mesh(new PlaneGeometry(2, 2), mat);
+        this._layerScenes.get(layerId)?.add(fillObj.threeObject);
+    }
+
+    _updateImage(fillObj) {
+        const mesh = fillObj.threeObject;
+        if (!mesh) return;
+        fillObj.applyBindings(this.audioData);
+
+        const mat     = mesh.material;
+        const opacity = fillObj.opacity ?? 1;
+        if (mat.opacity !== opacity) { mat.opacity = opacity; mat.transparent = opacity < 1; mat.needsUpdate = true; }
+
+        if (fillObj.imageName && mesh._imageLoadedName !== fillObj.imageName) {
+            mesh._imageLoadedName = fillObj.imageName;
+            const entry = PRESETS.BG_CATALOGUE.find(e => e.name === fillObj.imageName);
+            if (entry) new TextureLoader().load(entry.path, tex => { mat.map = tex; mat.needsUpdate = true; });
+        } else if (!fillObj.imageName && mat.map) {
+            mat.map = null; mat.needsUpdate = true;
+        }
+    }
+
+    // ─────────────────────────────────────────
     //  Model loading
     // ─────────────────────────────────────────
+
+    setHDRI(name) {
+        const entry = PRESETS.HDRI_CATALOGUE.find(e => e.name === name);
+        if (!entry) return;
+        this.selectedHDRI = name;
+        new EXRLoader().load(entry.path, tex => {
+            tex.mapping = EquirectangularReflectionMapping;
+            PRESETS.materials.standard.envMap = tex;
+            PRESETS.materials.standard.needsUpdate = true;
+        });
+    }
+
     _getLoader(path) {
         return path.endsWith('.fbx') ? new FBXLoader() : new OBJLoader();
+    }
+
+    // Walk FBX children and harvest any textures baked into the original materials
+    // before we replace them with our own.
+    _extractFBXTextures(object) {
+        const tex = { map: null, roughnessMap: null, metalnessMap: null, normalMap: null };
+        object.traverse(child => {
+            if (!child.isMesh) return;
+            const m = Array.isArray(child.material) ? child.material[0] : child.material;
+            if (!m) return;
+            if (!tex.map          && m.map)          tex.map          = m.map;
+            if (!tex.roughnessMap && m.roughnessMap) tex.roughnessMap = m.roughnessMap;
+            if (!tex.metalnessMap && m.metalnessMap) tex.metalnessMap = m.metalnessMap;
+            if (!tex.normalMap    && m.normalMap)    tex.normalMap    = m.normalMap;
+        });
+        return tex;
     }
 
     _getCatalogue(name) {
@@ -437,6 +519,8 @@ export class SceneBuilder {
 
         return new Promise((resolve, reject) => {
             this._getLoader(entry.path).load(entry.path, (object) => {
+                // Extract FBX textures while original materials are still intact
+                this._modelFBXTextures[modelObj.modelName] = this._extractFBXTextures(object);
                 this._modelCache[modelObj.modelName] = object;
                 this._prepareObject(object, modelObj, entry);
                 modelObj.threeObject = object;
@@ -449,6 +533,7 @@ export class SceneBuilder {
     _prepareObject(object, modelObj, entry) {
         object.scale.set(...entry.scale);
         object.originalPositions = {};
+        object._fbxTextures = this._modelFBXTextures[entry.name] ?? {};
 
         // Each model gets its own material instance so per-model opacity is independent.
         const mat = this._cloneMaterialForType(modelObj.materialType);
@@ -495,12 +580,13 @@ export class SceneBuilder {
                 if (obj.type === 'model')      this._updateModel(obj, time);
                 if (obj.type === 'pointLight') obj.applyBindings(this.audioData);
                 if (obj.type === 'wave')       this._updateWave(obj);
+                if (obj.type === 'image') this._updateImage(obj);
             }
         }
 
         // 1. Composite all 3D layers → _finalTarget
         this.renderer.setRenderTarget(this._finalTarget);
-        this.renderer.setClearColor(0x000000, 1);
+        this.renderer.setClearColor(this._bgColor, 1);
         this.renderer.clear();
 
         for (const layer of this.layers) {
@@ -549,8 +635,6 @@ export class SceneBuilder {
             this.renderer.clearDepth();
             this.renderer.render(this._gizmoScene, this.camera);
         }
-
-        this.renderer.setClearColor(0x000000, 1);
     }
 
     _updateModel(modelObj, time) {
@@ -604,17 +688,37 @@ export class SceneBuilder {
         // ── Material properties ───────────────────────
         if (modelObj.materialType === 'standard') {
             const mat = three._ownMaterial;
+            const fbx = three._fbxTextures ?? {};
+
             // Keep envMap in sync (EXR may finish loading after model)
             if (mat.envMap !== PRESETS.materials.standard.envMap) {
                 mat.envMap = PRESETS.materials.standard.envMap ?? null;
                 mat.needsUpdate = true;
             }
-            mat.roughness = Math.max(0, Math.min(1, modelObj.roughness.resolve(ad)));
-            mat.metalness = Math.max(0, Math.min(1, modelObj.metalness.resolve(ad)));
-            mat.color.set(modelObj.color);
-            if (modelObj.colorReactive) {
-                const hue = (ad.avgFrequency / 255) * (modelObj.colorSensitivity ?? 0.5);
-                mat.color.setHSL(hue, 1, 0.5);
+
+            // Sync FBX textures based on per-object flags
+            const wantMap      = modelObj.useMapTexture          ? (fbx.map          ?? null) : null;
+            const wantRoughMap = modelObj.useRoughnessMapTexture ? (fbx.roughnessMap ?? null) : null;
+            const wantMetalMap = modelObj.useMetalnessMapTexture ? (fbx.metalnessMap ?? null) : null;
+            const wantNormMap  = modelObj.useNormalMapTexture    ? (fbx.normalMap    ?? null) : null;
+            if (mat.map          !== wantMap)      { mat.map          = wantMap;      mat.needsUpdate = true; }
+            if (mat.roughnessMap !== wantRoughMap) { mat.roughnessMap = wantRoughMap; mat.needsUpdate = true; }
+            if (mat.metalnessMap !== wantMetalMap) { mat.metalnessMap = wantMetalMap; mat.needsUpdate = true; }
+            if (mat.normalMap    !== wantNormMap)  { mat.normalMap    = wantNormMap;  mat.needsUpdate = true; }
+
+            if (!modelObj.useRoughnessMapTexture)
+                mat.roughness = Math.max(0, Math.min(1, modelObj.roughness.resolve(ad)));
+            if (!modelObj.useMetalnessMapTexture)
+                mat.metalness = Math.max(0, Math.min(1, modelObj.metalness.resolve(ad)));
+
+            if (!modelObj.useMapTexture) {
+                mat.color.set(modelObj.color);
+                if (modelObj.colorReactive) {
+                    const hue = (ad.avgFrequency / 255) * (modelObj.colorSensitivity ?? 0.5);
+                    mat.color.setHSL(hue, 1, 0.5);
+                }
+            } else {
+                mat.color.set(0xffffff); // neutral tint so map colours show unaffected
             }
             const opacity = modelObj.opacity ?? 1;
             const wasTransparent = mat.transparent;
@@ -703,6 +807,10 @@ export class SceneBuilder {
                     const three = this._createWaveThreeObject(obj);
                     obj.threeObject = three;
                     scene.add(three);
+                } else if (obj.type === 'image' || obj.type === 'fill') {
+                    const mat  = new MeshBasicMaterial({ transparent: true });
+                    obj.threeObject = new Mesh(new PlaneGeometry(2, 2), mat);
+                    scene.add(obj.threeObject);
                 }
             }
         }

@@ -55,6 +55,91 @@ export const PP_SHADER_REGISTRY = {
         },
     },
 
+    sharpen: {
+        name:         'Sharpen',
+        vertexPath:   './shaders/vertex.glsl',
+        fragmentPath: './shaders/sharpen.glsl',
+        _vertSrc: null,
+        _fragSrc: null,
+        defaultProperties: { amount: 1.0, radius: 1.0, threshold: 0.0 },
+        propertyDefs: [
+            { key: 'amount',    label: 'Amount',    type: 'slider', min: 0, max: 5,   step: 0.01 },
+            { key: 'radius',    label: 'Radius',    type: 'slider', min: 1, max: 8,   step: 0.1  },
+            { key: 'threshold', label: 'Threshold', type: 'slider', min: 0, max: 1,   step: 0.01 },
+        ],
+        buildUniforms(props, w, h) {
+            return {
+                tDiffuse:    { value: null },
+                iResolution: { value: new Vector2(w, h) },
+                uAmount:     { value: props.amount },
+                uRadius:     { value: props.radius },
+                uThreshold:  { value: props.threshold },
+            };
+        },
+        updateUniforms(u, props, _time, w, h) {
+            u.iResolution.value.set(w, h);
+            u.uAmount.value    = props.amount;
+            u.uRadius.value    = props.radius;
+            u.uThreshold.value = props.threshold;
+        },
+    },
+
+    outline: {
+        name:         'Outline',
+        vertexPath:   './shaders/vertex.glsl',
+        fragmentPath: './shaders/outline.glsl',
+        _vertSrc: null,
+        _fragSrc: null,
+        defaultProperties: { amount: 1.0, thickness: 1.0, color: '#ffffff' },
+        propertyDefs: [
+            { key: 'amount',    label: 'Amount',    type: 'slider', min: 0, max: 5,  step: 0.01 },
+            { key: 'thickness', label: 'Thickness', type: 'slider', min: 1, max: 10, step: 0.1  },
+            { key: 'color',     label: 'Color',     type: 'color' },
+        ],
+        buildUniforms(props, w, h) {
+            return {
+                tDiffuse:    { value: null },
+                iResolution: { value: new Vector2(w, h) },
+                uAmount:     { value: props.amount },
+                uThickness:  { value: props.thickness },
+                uColor:      { value: new Color(props.color) },
+            };
+        },
+        updateUniforms(u, props, _time, w, h) {
+            u.iResolution.value.set(w, h);
+            u.uAmount.value    = props.amount;
+            u.uThickness.value = props.thickness;
+            u.uColor.value.set(props.color);
+        },
+    },
+
+    waterPaint: {
+        name:         'Water Paint',
+        vertexPath:   './shaders/vertex.glsl',
+        fragmentPath: './shaders/waterpaint.glsl',
+        _vertSrc: null,
+        _fragSrc: null,
+        defaultProperties: { scribbleStrength: 1.0, vignette: true },
+        propertyDefs: [
+            { key: 'scribbleStrength', label: 'Scribble Strength', type: 'slider', min: 0, max: 3, step: 0.01 },
+            { key: 'vignette',         label: 'Vignette',          type: 'checkbox' },
+        ],
+        buildUniforms(props, w, h) {
+            return {
+                tDiffuse:          { value: null },
+                iChannel1:         { value: _getOrLoadNoiseTex() },
+                iResolution:       { value: new Vector2(w, h) },
+                uScribbleStrength: { value: props.scribbleStrength },
+                uVignette:         { value: props.vignette ? 1.0 : 0.0 },
+            };
+        },
+        updateUniforms(u, props, _time, w, h) {
+            u.iResolution.value.set(w, h);
+            u.uScribbleStrength.value = props.scribbleStrength;
+            u.uVignette.value         = props.vignette ? 1.0 : 0.0;
+        },
+    },
+
     colorBlocks: {
         name:         'Color Blocks',
         vertexPath:   './shaders/vertex.glsl',

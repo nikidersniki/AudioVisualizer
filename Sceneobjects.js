@@ -117,6 +117,10 @@ export class ModelObject extends SceneObject {
         this.color        = '#888888';
         this.roughness    = new PropertyBinding(1);
         this.metalness    = new PropertyBinding(0);
+        this.useMapTexture          = true;
+        this.useRoughnessMapTexture = true;
+        this.useMetalnessMapTexture = true;
+        this.useNormalMapTexture    = true;
 
         // Noise displacement
         this.noiseScale   = new PropertyBinding(1);
@@ -233,6 +237,49 @@ export class WaveObject extends SceneObject {
 }
 
 // ─────────────────────────────────────────────
+//  FillObject  (image plane in scene)
+// ─────────────────────────────────────────────
+export class FillObject extends SceneObject {
+    constructor() {
+        super('image');
+        this.name       = 'Image';
+        this.imageName  = null;
+        this.audioScale = new PropertyBinding(1);
+        this.opacity    = 1;
+    }
+
+    applyBindings(audioData) {
+        if (!this.threeObject) return;
+        this.threeObject.visible = this.visible;
+        const s = this.audioScale.resolve(audioData);
+        this.threeObject.scale.set(
+            this.scaleX.resolve(audioData) * s,
+            this.scaleY.resolve(audioData) * s,
+            this.scaleZ.resolve(audioData) * s
+        );
+        this.threeObject.position.set(
+            this.posX.resolve(audioData),
+            this.posY.resolve(audioData),
+            this.posZ.resolve(audioData)
+        );
+        this.threeObject.rotation.set(
+            this.rotX.resolve(audioData),
+            this.rotY.resolve(audioData),
+            this.rotZ.resolve(audioData)
+        );
+    }
+
+    toJSON() { return this._bindingsToJSON(); }
+
+    static fromJSON(d) {
+        const obj = new FillObject();
+        obj._restoreBindings(d);
+        obj.type = 'image'; // normalize old 'fill' saves
+        return obj;
+    }
+}
+
+// ─────────────────────────────────────────────
 //  Layer
 // ─────────────────────────────────────────────
 export class Layer {
@@ -266,9 +313,10 @@ export class Layer {
         layer.visible = data.visible ?? true;
         layer.opacity = data.opacity ?? 1;
         layer.objects = (data.objects || []).map(o => {
-            if (o.type === 'model')      return ModelObject.fromJSON(o);
-            if (o.type === 'pointLight') return PointLightObject.fromJSON(o);
-            if (o.type === 'wave')       return WaveObject.fromJSON(o);
+            if (o.type === 'model')                    return ModelObject.fromJSON(o);
+            if (o.type === 'pointLight')               return PointLightObject.fromJSON(o);
+            if (o.type === 'wave')                     return WaveObject.fromJSON(o);
+            if (o.type === 'image' || o.type === 'fill') return FillObject.fromJSON(o);
             return null;
         }).filter(Boolean);
         return layer;
