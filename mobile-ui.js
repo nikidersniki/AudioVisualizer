@@ -2,7 +2,7 @@
     const MQ = window.matchMedia('(max-width: 768px)');
 
     let drawer, handle, tabBar, body, tabs;
-    let placeholderControls, placeholderPlayer;
+    let placeholderControls, placeholderPlayer, placeholderProgress, placeholderNowPlaying;
     let currentTab = 'controls';
     let isOpen = false;
 
@@ -11,21 +11,16 @@
 
         drawer = document.createElement('div');
         drawer.id = 'mobile-drawer';
-        const progress = document.getElementById('progress-bar-container');
-        progress.remove();
         drawer.innerHTML = `
             <div id="drawer-handle"><div class="drawer-grip"></div></div>
-        `;
-
-        document.body.appendChild(drawer);
-        drawer.appendChild(progress);
-        drawer.innerHTML += `
+            <div id="drawer-top-slot"></div>
             <div id="drawer-tabs">
                 <div class="drawer-tab" data-tab="tracks">Saved Tracks</div>
                 <div class="drawer-tab selected" data-tab="controls">Controls</div>
             </div>
             <div id="drawer-body"></div>
         `;
+        document.body.appendChild(drawer);
         handle = drawer.querySelector('#drawer-handle');
         tabBar = drawer.querySelector('#drawer-tabs');
         body = drawer.querySelector('#drawer-body');
@@ -95,6 +90,8 @@
     function reparent() {
         const ctrls = document.getElementById('controlls');
         const plyr  = document.getElementById('player');
+        const progress = document.getElementById('progress-bar-container');
+        const nowPlaying = document.getElementById('now-playing');
         if (!ctrls || !plyr) return;
 
         if (!placeholderControls) {
@@ -104,6 +101,19 @@
         if (!placeholderPlayer) {
             placeholderPlayer = document.createComment('player-placeholder');
             plyr.parentNode.insertBefore(placeholderPlayer, plyr);
+        }
+        if (progress && !placeholderProgress) {
+            placeholderProgress = document.createComment('progress-placeholder');
+            progress.parentNode.insertBefore(placeholderProgress, progress);
+        }
+        if (nowPlaying && !placeholderNowPlaying) {
+            placeholderNowPlaying = document.createComment('now-playing-placeholder');
+            nowPlaying.parentNode.insertBefore(placeholderNowPlaying, nowPlaying);
+        }
+        const topSlot = drawer.querySelector('#drawer-top-slot');
+        if (topSlot) {
+            if (nowPlaying) topSlot.appendChild(nowPlaying);
+            if (progress)   topSlot.appendChild(progress);
         }
         body.appendChild(plyr);
         body.appendChild(ctrls);
@@ -119,6 +129,8 @@
     function restore() {
         const ctrls = document.getElementById('controlls');
         const plyr  = document.getElementById('player');
+        const progress = document.getElementById('progress-bar-container');
+        const nowPlaying = document.getElementById('now-playing');
         if (placeholderControls && ctrls) {
             placeholderControls.parentNode.insertBefore(ctrls, placeholderControls);
             placeholderControls.remove();
@@ -128,6 +140,16 @@
             placeholderPlayer.parentNode.insertBefore(plyr, placeholderPlayer);
             placeholderPlayer.remove();
             placeholderPlayer = null;
+        }
+        if (placeholderProgress && progress) {
+            placeholderProgress.parentNode.insertBefore(progress, placeholderProgress);
+            placeholderProgress.remove();
+            placeholderProgress = null;
+        }
+        if (placeholderNowPlaying && nowPlaying) {
+            placeholderNowPlaying.parentNode.insertBefore(nowPlaying, placeholderNowPlaying);
+            placeholderNowPlaying.remove();
+            placeholderNowPlaying = null;
         }
         if (ctrls) ctrls.classList.remove('drawer-hidden');
         if (plyr)  plyr.classList.remove('drawer-hidden');

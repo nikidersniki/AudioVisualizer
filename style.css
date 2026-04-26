@@ -1322,9 +1322,16 @@ header .h2 {
         font-size: 1.1rem;
         padding: 4px 6px;
     }
+    #now-playing {
+        display: block;
+        padding: 6px 10px 0;
+        text-align: center;
+    }
     #track-name {
+        position: static;
         font-size: 0.9rem;
         bottom: auto;
+        width: auto;
     }
 
     /* ── Popup full screen ── */
