@@ -6,6 +6,108 @@ import { SceneBuilder, PRESETS}    from './SceneBuilder.js';
 import { Layer, ModelObject, PointLightObject, WaveObject, FillObject, PropertyBinding} from './Sceneobjects.js';
 import { PP_SHADER_REGISTRY, PP_NATIVE_REGISTRY, PostProcessingLayer, PostProcessingPipeline, NativePassLayer, initShaders } from './PostProcessing.js';
 import {generateMaterialPreviews, generateModelPreviews, generatePPPreviews} from './PreviewRenderer.js';
+
+// ─────────────────────────────────────────────
+//  Global Range Input Decorator
+//  Wraps every <input type="range"> in a rectangle with
+//  fill % background and value printed inside.
+// ─────────────────────────────────────────────
+const _rangeValueDesc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+function decorateRangeInput(input) {
+    if (input._decorated) return;
+    if (input.closest('.custom-slider')) { input._decorated = true; return; }
+    input._decorated = true;
+
+    const slider = document.createElement('div');
+    slider.className = 'custom-slider';
+    const fill = document.createElement('div');
+    fill.className = 'custom-slider-fill';
+    const valueEl = document.createElement('div');
+    valueEl.className = 'custom-slider-value';
+
+    // Preserve flex sizing from the original input
+    if (input.classList.contains('prop-slider') || input.classList.contains('layer-opacity-slider')) {
+        slider.style.flex = '1';
+    }
+
+    input.parentNode.insertBefore(slider, input);
+    slider.appendChild(fill);
+    slider.appendChild(valueEl);
+    slider.appendChild(input);
+
+    const update = () => {
+        const min = parseFloat(input.min) || 0;
+        const max = parseFloat(input.max);
+        const maxV = isNaN(max) ? 100 : max;
+        const v = parseFloat(input.value) || 0;
+        const pct = ((v - min) / (maxV - min)) * 100;
+        fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+        const step = parseFloat(input.step) || 1;
+        const decimals = step >= 1 ? 0 : Math.min(3, (step.toString().split('.')[1]?.length ?? 2));
+        valueEl.textContent = v.toFixed(decimals);
+    };
+
+    input.addEventListener('input', update);
+    input.addEventListener('change', update);
+    Object.defineProperty(input, 'value', {
+        configurable: true,
+        get() { return _rangeValueDesc.get.call(this); },
+        set(v) { _rangeValueDesc.set.call(this, v); update(); },
+    });
+    update();
+
+    slider.addEventListener('dblclick', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (slider.querySelector('.custom-slider-edit')) return;
+
+        const editor = document.createElement('input');
+        editor.type = 'number';
+        editor.className = 'custom-slider-edit';
+        editor.min  = input.min;
+        editor.max  = input.max;
+        editor.step = input.step;
+        editor.value = input.value;
+        slider.appendChild(editor);
+        editor.focus();
+        editor.select();
+
+        const commit = () => {
+            let v = parseFloat(editor.value);
+            if (isNaN(v)) v = parseFloat(input.value);
+            const min = parseFloat(input.min) || 0;
+            const max = parseFloat(input.max);
+            if (v < min)        input.min = v;
+            if (!isNaN(max) && v > max) input.max = v;
+            input.value = v;
+            input.dispatchEvent(new Event('input',  { bubbles: true }));
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+            editor.remove();
+        };
+        editor.addEventListener('blur', commit);
+        editor.addEventListener('keydown', ev => {
+            if (ev.key === 'Enter')  { ev.preventDefault(); editor.blur(); }
+            if (ev.key === 'Escape') { editor.value = input.value; editor.blur(); }
+        });
+    });
+}
+
+function decorateAllRangeInputs(root = document) {
+    root.querySelectorAll?.('input[type="range"]').forEach(decorateRangeInput);
+}
+
+const _rangeObserver = new MutationObserver(muts => {
+    for (const m of muts) {
+        for (const node of m.addedNodes) {
+            if (node.nodeType !== 1) continue;
+            if (node.matches?.('input[type="range"]')) decorateRangeInput(node);
+            decorateAllRangeInputs(node);
+        }
+    }
+});
+_rangeObserver.observe(document.body, { childList: true, subtree: true });
+decorateAllRangeInputs();
+
 // ─────────────────────────────────────────────
 //  Scene
 // ─────────────────────────────────────────────
@@ -30,6 +132,8 @@ let isDragging   = false;
 let Volume       = 1;
 let allTracks    = [];   // { id, file, name, ... } in display order
 let currentTrackId = null;
+const customCatalogues = { hdri: [], bg: [], video: [] }; // { name, dataURL } — persisted in global layer
+let animatedProperties = []; // [{ objectId, key, label }] — persisted in global layer
 
 // ─────────────────────────────────────────────
 //  IndexedDB
@@ -96,7 +200,8 @@ function serializeAll() {
     }));
     return [
         { id: 'global', name: 'Global', isGlobal: true, objects: [], ppLayers: globalPPLayers,
-          bgColor: builder._bgColor, hdri: builder.selectedHDRI },
+          bgColor: builder._bgColor, hdri: builder.selectedHDRI,
+          customCatalogues, animatedProperties },
         ...sceneLayers,
     ];
 }
@@ -110,7 +215,23 @@ async function deserializeAll(data) {
         if (id !== 'global') ppContexts.delete(id);
     }
 
+    // Restore custom catalogues BEFORE loadFromJSON so FillObjects can resolve
+    // their image references and HDRI lookups work on first frame
+    if (globalEntry?.customCatalogues) {
+        const saved = globalEntry.customCatalogues;
+        customCatalogues.hdri  = [];
+        customCatalogues.bg    = [];
+        customCatalogues.video = [];
+        for (const e of (saved.hdri  ?? [])) _registerCustomHDRI(e.name,  e.dataURL);
+        for (const e of (saved.bg    ?? [])) _registerCustomBG(e.name,    e.dataURL);
+        for (const e of (saved.video ?? [])) _registerCustomVideo(e.name, e.dataURL);
+    }
+
     await builder.loadFromJSON(sceneLayers);
+
+    // Restore animated property list
+    animatedProperties = Array.isArray(globalEntry?.animatedProperties)
+        ? [...globalEntry.animatedProperties] : [];
 
     // Restore scene settings
     if (globalEntry?.bgColor) {
@@ -141,6 +262,213 @@ async function deserializeAll(data) {
             ppContexts.set(layer.id, { layers, pipeline: lpp });
             builder.setLayerPPPipeline(layer.id, lpp);
         }
+    }
+}
+
+// ── Custom catalogue registration helpers ──────────────────────
+function _registerCustomHDRI(name, dataURL) {
+    if (PRESETS.HDRI_CATALOGUE.find(e => e.name === name)) return;
+    PRESETS.HDRI_CATALOGUE.push({ name, path: dataURL });
+    customCatalogues.hdri.push({ name, dataURL });
+    const sel = document.getElementById('scene-hdri');
+    if (sel && !sel.querySelector(`option[value="${CSS.escape(name)}"]`)) {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = name;
+        sel.appendChild(opt);
+    }
+}
+
+function _registerCustomBG(name, dataURL) {
+    if (PRESETS.BG_CATALOGUE.find(e => e.name === name)) return;
+    PRESETS.BG_CATALOGUE.push({ name, path: dataURL });
+    customCatalogues.bg.push({ name, dataURL });
+}
+
+function _registerCustomVideo(name, dataURL) {
+    if (!PRESETS.VIDEO_CATALOGUE) PRESETS.VIDEO_CATALOGUE = [];
+    if (PRESETS.VIDEO_CATALOGUE.find(e => e.name === name)) return;
+    PRESETS.VIDEO_CATALOGUE.push({ name, path: dataURL });
+    customCatalogues.video.push({ name, dataURL });
+}
+
+function fileToDataURL(file) {
+    return new Promise((res, rej) => {
+        const reader = new FileReader();
+        reader.onload  = e => res(e.target.result);
+        reader.onerror = rej;
+        reader.readAsDataURL(file);
+    });
+}
+
+// ── Animation registry ─────────────────────────────────────────
+function findObjectById(id) {
+    for (const layer of builder.layers) {
+        const obj = layer.objects?.find(o => o.id === id);
+        if (obj) return { obj, layer };
+    }
+    return null;
+}
+
+function isPropertyAnimated(objectId, key) {
+    return animatedProperties.some(e => e.objectId === objectId && e.key === key);
+}
+
+function toggleAnimatedProperty(objectId, key, label, range = { min: -10, max: 10 }) {
+    const idx = animatedProperties.findIndex(e => e.objectId === objectId && e.key === key);
+    if (idx >= 0) {
+        animatedProperties.splice(idx, 1);
+        const found = findObjectById(objectId);
+        if (found && found.obj[key]) found.obj[key].mode = 'constant';
+    } else {
+        animatedProperties.push({ objectId, key, label, range });
+        const found = findObjectById(objectId);
+        if (found && found.obj[key]) found.obj[key].mode = 'audio';
+    }
+    saveAllToDB();
+    if (currentTab === 'anim') renderAnimationList();
+}
+
+function _animPropRow(labelText, control) {
+    const row = document.createElement('div');
+    row.className = 'prop-row';
+    const lbl = document.createElement('label');
+    lbl.className = 'prop-label';
+    lbl.textContent = labelText;
+    row.appendChild(lbl);
+    row.appendChild(control);
+    return row;
+}
+
+function _animSliderControl(value, range, step, onChange) {
+    const wrap = document.createElement('div');
+    wrap.className = 'prop-slider-wrap';
+    const slider = document.createElement('input');
+    slider.type = 'range'; slider.className = 'prop-slider';
+    slider.min = range.min; slider.max = range.max; slider.step = step;
+    slider.value = value;
+    const num = document.createElement('input');
+    num.type = 'number'; num.className = 'prop-number';
+    num.step = step; num.value = value;
+    slider.addEventListener('input', () => { num.value = slider.value; onChange(parseFloat(slider.value)); });
+    num.addEventListener('input',    () => { slider.value = num.value; onChange(parseFloat(num.value)); });
+    wrap.appendChild(slider); wrap.appendChild(num);
+    return wrap;
+}
+
+function _animSelectControl(options, value, onChange) {
+    const sel = document.createElement('select');
+    sel.className = 'prop-select';
+    options.forEach(o => {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = o;
+        sel.appendChild(opt);
+    });
+    sel.value = value;
+    sel.addEventListener('change', () => onChange(sel.value));
+    return sel;
+}
+
+function renderAnimationList() {
+    const list = document.getElementById('anim-list');
+    list.innerHTML = '';
+
+    animatedProperties = animatedProperties.filter(e => findObjectById(e.objectId));
+
+    if (animatedProperties.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'anim-empty';
+        empty.textContent = 'No animated properties yet — click the ● icon next to any property.';
+        list.appendChild(empty);
+        return;
+    }
+
+    const byObject = new Map();
+    for (const entry of animatedProperties) {
+        if (!byObject.has(entry.objectId)) byObject.set(entry.objectId, []);
+        byObject.get(entry.objectId).push(entry);
+    }
+
+    for (const [objectId, entries] of byObject) {
+        const found = findObjectById(objectId);
+        if (!found) continue;
+        const { obj } = found;
+
+        const groupWrap = document.createElement('div');
+        groupWrap.className = 'anim-group';
+
+        const header = document.createElement('div');
+        header.className = 'anim-object';
+        const arrow = document.createElement('span');
+        arrow.className = 'anim-object-arrow';
+        arrow.textContent = '▾';
+        const title = document.createElement('span');
+        title.textContent = obj.name || obj.type;
+        header.appendChild(arrow);
+        header.appendChild(title);
+        groupWrap.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'anim-group-body';
+
+        for (const entry of entries) {
+            const binding = obj[entry.key];
+            if (!binding) continue;
+            const range = entry.range ?? { min: -10, max: 10 };
+
+            const propWrap = document.createElement('div');
+            propWrap.className = 'anim-property-block';
+
+            const propHead = document.createElement('div');
+            propHead.className = 'anim-property-head collapsed';
+            const propName = document.createElement('span');
+            propName.textContent = entry.label;
+            const propArrow = document.createElement('span');
+            propArrow.className = 'anim-property-arrow';
+            propArrow.textContent = '▾';
+            const rm = document.createElement('span');
+            rm.className = 'anim-property-remove';
+            rm.textContent = '✕';
+            rm.title = 'Remove';
+            rm.addEventListener('click', e => {
+                e.stopPropagation();
+                toggleAnimatedProperty(entry.objectId, entry.key, entry.label, range);
+            });
+            propHead.appendChild(propName);
+            propHead.appendChild(propArrow);
+            propHead.appendChild(rm);
+            propWrap.appendChild(propHead);
+
+            const propBody = document.createElement('div');
+            propBody.className = 'anim-property-body';
+            propBody.style.display = 'none';
+
+            propBody.appendChild(_animPropRow('Source',
+                _animSelectControl(AUDIO_SOURCES, binding.source, v => { binding.source = v; saveAllToDB(); })));
+            propBody.appendChild(_animPropRow('Curve',
+                _animSelectControl(CURVES, binding.curve, v => { binding.curve = v; saveAllToDB(); })));
+            propBody.appendChild(_animPropRow('Min',
+                _animSliderControl(binding.min, range, 0.001, v => { binding.min = v; saveAllToDB(); })));
+            propBody.appendChild(_animPropRow('Max',
+                _animSliderControl(binding.max, range, 0.001, v => { binding.max = v; saveAllToDB(); })));
+
+            propHead.addEventListener('click', () => {
+                const collapsed = propHead.classList.toggle('collapsed');
+                propBody.style.display = collapsed ? 'none' : '';
+            });
+
+            propWrap.appendChild(propBody);
+            body.appendChild(propWrap);
+        }
+        header.classList.add('collapsed');
+        body.style.display = 'none';
+        groupWrap.appendChild(body);
+
+        header.addEventListener('click', () => {
+            const collapsed = header.classList.toggle('collapsed');
+            body.style.display = collapsed ? 'none' : '';
+        });
+
+        list.appendChild(groupWrap);
     }
 }
 
@@ -183,17 +511,59 @@ function downloadLayersToFile(Name) {
 }
 
 
+let currentProjectName = '';
+
 document.getElementById('file-save').addEventListener('click', ()=>{
-    spawnPopup("Save Project", [['Name','text']])
+    spawnPopup("Save Project", [['Name','text', false, currentProjectName]])
             .then(data => {
-                const {
-                    Name
-                } = data;
+                const { Name } = data;
+                currentProjectName = Name;
                 downloadLayersToFile(Name);
             })
             .catch(() => {});
-    
+
 });
+
+const newProjectBtn = document.getElementById('file-new');
+if (newProjectBtn) {
+    newProjectBtn.addEventListener('click', async () => {
+        const choice = await spawnPopup("Save current project first?", [
+            ['Save before clearing','select', ['Yes','No','Cancel']]
+        ]).catch(() => null);
+        if (!choice) return;
+        const action = choice['Save before clearing'];
+        if (action === 'Cancel') return;
+        if (action === 'Yes') {
+            const data = await spawnPopup("Save Project",
+                [['Name','text', false, currentProjectName]]).catch(() => null);
+            if (!data) return;
+            currentProjectName = data.Name;
+            downloadLayersToFile(data.Name);
+        }
+        const named = await spawnPopup("New Project", [['Name','text']]).catch(() => null);
+        if (!named) return;
+        currentProjectName = named.Name || '';
+        await deserializeAll([
+            { id: 'global', name: 'Global', isGlobal: true, objects: [],
+              ppLayers: [], customCatalogues: { hdri: [], bg: [], video: [] },
+              animatedProperties: [] }
+        ]);
+        const globalCtx = ppContexts.get('global');
+        if (globalCtx) {
+            globalCtx.layers = [];
+            globalCtx.pipeline.layers = [];
+        }
+        for (const id of [...ppContexts.keys()]) {
+            if (id !== 'global') ppContexts.delete(id);
+        }
+        builder.addLayer(new Layer('Background', true));
+        renderLayerList();
+        switchPPContext('global');
+        if (builder.layers.length > 0) selectLayer(builder.layers[0]);
+        renderAnimationList();
+        saveAllToDB();
+    });
+}
 const fileInput = document.getElementById('file-input');
 
 document.getElementById('file-open').addEventListener('click', () => {
@@ -368,13 +738,15 @@ function spawnPopup(title, popupFields) {
                 input.id = "popup-input-" + index;
             }
             else if (type === 'preview') {
-                const previewType = required; // 'model', 'material', or 'pp'
+                const previewType = required; // 'model', 'material', 'pp', 'bg', or 'video'
                 const defaultVal  = previewType === 'model'
                     ? PRESETS.MODEL_CATALOGUE[0]?.name
                     : previewType === 'pp'
                     ? Object.values(PP_SHADER_REGISTRY)[0]?.name
                     : previewType === 'bg'
                     ? PRESETS.BG_CATALOGUE[0]?.name
+                    : previewType === 'video'
+                    ? (PRESETS.VIDEO_CATALOGUE || [])[0]?.name
                     : Object.keys(PRESETS.materials)[0];
                 input = document.createElement('input');
                 input.type  = 'hidden';
@@ -394,6 +766,7 @@ function spawnPopup(title, popupFields) {
             }
             else{
                 input.type = type;
+                if (element[3] !== undefined) input.value = element[3];
             }
 
             const nameField = document.createElement('div');
@@ -402,6 +775,7 @@ function spawnPopup(title, popupFields) {
 
             const box = document.createElement('div');
             if (extraElement) box.classList.add('preview-field');
+            box.dataset.label = text;
             box.appendChild(nameField);
             box.appendChild(input);
             if (extraElement) box.appendChild(extraElement);
@@ -472,6 +846,96 @@ function spawnPopup(title, popupFields) {
 }
 
 // ─────────────────────────────────────────────
+//  Drag and Drop Handler
+// ─────────────────────────────────────────────
+const dragDrop = document.getElementById('drag-drop');
+
+async function handleDroppedFile(file) {
+    if (file.type.startsWith('audio/')) {
+        const trackId = await saveAudioFile(file);
+        const songName = await readID3Title({ file });
+        const name = songName || file.name;
+        const record = { id: trackId, file, name, type: file.type, isPlaying: false };
+        allTracks.push(record);
+        const lI = document.createElement('div');
+        const button = document.createElement('button');
+        button.textContent = name;
+        button.classList.add('list-button');
+        button.dataset.trackName = name;
+        button.onclick = () => loadAudioFromRecord(record);
+        lI.appendChild(button);
+        document.getElementById('saved-tracks').appendChild(lI);
+        loadAudioFromRecord(record);
+        return;
+    }
+
+    if (file.type.startsWith('image/')) {
+        let result;
+        try {
+            result = await spawnPopup('Add Image', [
+                ['Name', 'text', true],
+                ['Type', 'select', ['HDRI', 'Background']],
+            ]);
+        } catch { return; }
+        const { Name: name, Type: type } = result;
+        const dataURL = await fileToDataURL(file);
+        if (type === 'HDRI') {
+            _registerCustomHDRI(name, dataURL);
+            const hdriSelect = document.getElementById('scene-hdri');
+            hdriSelect.value = name;
+            builder.setHDRI(name);
+        } else {
+            _registerCustomBG(name, dataURL);
+            if (selectedObject) {
+                const layer = builder.layers.find(l => l.objects?.some(o => o.id === selectedObject.id));
+                if (layer) renderObjectProperties(selectedObject, layer);
+            }
+        }
+        saveAllToDB();
+        return;
+    }
+
+    if (file.type.startsWith('video/')) {
+        let result;
+        try {
+            result = await spawnPopup('Add Video', [
+                ['Name', 'text', true],
+            ]);
+        } catch { return; }
+        const { Name: name } = result;
+        const dataURL = await fileToDataURL(file);
+        _registerCustomVideo(name, dataURL);
+        saveAllToDB();
+    }
+}
+
+let _dragCounter = 0;
+window.addEventListener('dragenter', e => {
+    e.preventDefault();
+    _dragCounter++;
+    dragDrop.classList.add('active');
+});
+window.addEventListener('dragleave', () => {
+    _dragCounter--;
+    if (_dragCounter <= 0) { _dragCounter = 0; dragDrop.classList.remove('active'); }
+});
+window.addEventListener('dragover', e => e.preventDefault());
+window.addEventListener('drop', async e => {
+    e.preventDefault();
+    _dragCounter = 0;
+    dragDrop.classList.remove('active');
+    const file = e.dataTransfer.files[0];
+    if (file) await handleDroppedFile(file);
+});
+
+const resourceInput = document.getElementById('resource-input');
+document.getElementById('add-resources').addEventListener('click', () => resourceInput.click());
+resourceInput.addEventListener('change', async e => {
+    for (const file of e.target.files) await handleDroppedFile(file);
+    resourceInput.value = '';
+});
+
+// ─────────────────────────────────────────────
 //  Progress bar
 // ─────────────────────────────────────────────
 const progressBar         = document.getElementById('progress-bar');
@@ -531,16 +995,31 @@ function _deserializePPLayer(d) {
 // ─────────────────────────────────────────────
 let currentTab = 'oe';
 
+function _updateTabPill() {
+    const pill = document.getElementById('editor-switch-pill');
+    const active = document.querySelector('#editorSwitch .switch-tab.selected');
+    if (!pill || !active) return;
+    pill.style.left  = active.offsetLeft + 'px';
+    pill.style.width = active.offsetWidth + 'px';
+}
+
 function switchTab(tab) {
     currentTab = tab;
-    const isOE = tab === 'oe';
-    // #layers is always visible — it doubles as PP context selector in PP mode
-    document.getElementById('current-layer-controls').style.display = isOE ? '' : 'none';
-    document.getElementById('pp-section').style.display            = isOE ? 'none' : '';
-    document.getElementById('oe-btn').classList.toggle('selected',  isOE);
-    document.getElementById('pp-editor').classList.toggle('selected', !isOE);
-    renderLayerList(); // re-render to add/remove Global item and rewire click handlers
+    const isOE   = tab === 'oe';
+    const isPP   = tab === 'pp';
+    const isAnim = tab === 'anim';
+    document.getElementById('current-layer-controls').style.display = isOE   ? '' : 'none';
+    document.getElementById('pp-section').style.display             = isPP   ? '' : 'none';
+    document.getElementById('anim-section').style.display           = isAnim ? '' : 'none';
+    document.getElementById('layers').style.display                 = isAnim ? 'none' : '';
+    document.getElementById('oe-btn').classList.toggle('selected',     isOE);
+    document.getElementById('pp-editor').classList.toggle('selected',  isPP);
+    document.getElementById('anim-btn').classList.toggle('selected',   isAnim);
+    _updateTabPill();
+    if (isAnim) renderAnimationList();
+    else        renderLayerList();
 }
+window.addEventListener('resize', _updateTabPill);
 
 // ─────────────────────────────────────────────
 //  PP context selector
@@ -933,14 +1412,26 @@ function selectLayer(layer) {
     if (layer.isBase) {
         const addImage = document.createElement('div');
         addImage.classList.add('Btn');
-        addImage.textContent = 'Add Image';
+        addImage.textContent = 'Add Fill(Image/Video)';
         addImage.addEventListener('click', () => {
-            spawnPopup('Add Image', [
+            const p = spawnPopup('Add Image/Video', [
                 ['Name',  'text'],
+                ['Type',  'select', ['image', 'video']],
                 ['Image', 'preview', 'bg'],
-            ])
-            .then(data => onAddImage(layer, data))
-            .catch(() => {});
+                ['Video', 'preview', 'video'],
+            ]);
+            const popup = document.querySelector('.popup');
+            const typeSel = popup?.querySelector('[data-label="Type"] select');
+            const imgBox  = popup?.querySelector('[data-label="Image"]');
+            const vidBox  = popup?.querySelector('[data-label="Video"]');
+            const apply = () => {
+                const isVideo = typeSel?.value === 'video';
+                if (imgBox) imgBox.style.display = isVideo ? 'none' : '';
+                if (vidBox) vidBox.style.display = isVideo ? '' : 'none';
+            };
+            typeSel?.addEventListener('change', apply);
+            apply();
+            p.then(data => onAddImage(layer, data)).catch(() => {});
         });
         buttonBox.appendChild(addImage);
     }
@@ -1165,58 +1656,24 @@ function renderObjectProperties(obj, layer) {
         return r;
     }
 
-    // PropertyBinding sub-panel
+    // PropertyBinding sub-panel — constant value + animate icon.
+    // Audio sync configuration lives in the Animation tab.
     function bindingPanel(label, binding, range = { min: -10, max: 10 }) {
         const container = document.createElement('div');
         container.className = 'prop-binding';
         (currentSection || panel).appendChild(container);
 
-        const head = document.createElement('div');
-        head.className = 'prop-binding-title h2';
-        head.textContent = label;
-        container.appendChild(head);
+        const ownerKey = selectedObject
+            ? Object.keys(selectedObject).find(k => selectedObject[k] === binding)
+            : null;
 
-        // Mode toggle
-        const modeRow = document.createElement('div');
-        modeRow.className = 'prop-row';
-        const modeLbl = document.createElement('label');
-        modeLbl.className = 'prop-label';
-        modeLbl.textContent = 'Mode';
-        modeRow.appendChild(modeLbl);
-
-        const modeWrap = document.createElement('div');
-        modeWrap.className = 'prop-mode-toggle';
-
-        ['constant','audio'].forEach(m => {
-            const btn = document.createElement('div');
-            btn.textContent = m;
-            btn.className = 'mode-btn' + (binding.mode === m ? ' active' : '');
-            btn.addEventListener('click', () => {
-                binding.mode = m;
-                modeWrap.querySelectorAll('.mode-btn').forEach(b =>
-                    b.classList.toggle('active', b.textContent === m));
-                // show/hide relevant rows
-                constantSection.style.display = m === 'constant' ? '' : 'none';
-                audioSection.style.display    = m === 'audio'    ? '' : 'none';
-                save();
-            });
-            modeWrap.appendChild(btn);
-        });
-        modeRow.appendChild(modeWrap);
-        container.appendChild(modeRow);
-
-        // Constant value
-        const constantSection = document.createElement('div');
-        constantSection.style.display = binding.mode === 'constant' ? '' : 'none';
-        container.appendChild(constantSection);
-
-        const cSliderRow = document.createElement('div');
-        cSliderRow.className = 'prop-row';
-        const cLbl = document.createElement('label');
-        cLbl.className = 'prop-label';
-        cLbl.textContent = 'Value';
-        const cWrap = document.createElement('div');
-        cWrap.className = 'prop-slider-wrap';
+        const valueRow = document.createElement('div');
+        valueRow.className = 'prop-row';
+        const lbl = document.createElement('label');
+        lbl.className = 'prop-label';
+        lbl.textContent = label;
+        const wrap = document.createElement('div');
+        wrap.className = 'prop-slider-wrap';
 
         const cSlider = document.createElement('input');
         cSlider.type = 'range'; cSlider.className = 'prop-slider';
@@ -1236,102 +1693,40 @@ function renderObjectProperties(obj, layer) {
             cSlider.value = binding.value; save();
         });
 
-        cWrap.appendChild(cSlider); cWrap.appendChild(cNum);
-        cSliderRow.appendChild(cLbl); cSliderRow.appendChild(cWrap);
-        constantSection.appendChild(cSliderRow);
+        wrap.appendChild(cSlider);
+        wrap.appendChild(cNum);
 
-        // Audio section
-        const audioSection = document.createElement('div');
-        audioSection.style.display = binding.mode === 'audio' ? '' : 'none';
-        container.appendChild(audioSection);
+        if (ownerKey) {
+            const animBtn = document.createElement('div');
+            animBtn.className = 'prop-animate-btn';
+            animBtn.textContent = '●';
+            animBtn.title = 'Animate (audio sync)';
+            const refresh = () => animBtn.classList.toggle('active',
+                isPropertyAnimated(selectedObject.id, ownerKey));
+            refresh();
+            animBtn.addEventListener('click', () => {
+                const nowOn = !isPropertyAnimated(selectedObject.id, ownerKey);
+                binding.mode = nowOn ? 'audio' : 'constant';
+                toggleAnimatedProperty(selectedObject.id, ownerKey, label, range);
+                refresh();
+                cSlider.disabled = nowOn;
+                cNum.disabled    = nowOn;
+                valueRow.classList.toggle('animated', nowOn);
+            });
+            const animated = isPropertyAnimated(selectedObject.id, ownerKey);
+            cSlider.disabled = animated;
+            cNum.disabled    = animated;
+            valueRow.classList.toggle('animated', animated);
+            wrap.appendChild(animBtn);
+        }
 
-        // Source select
-        const srcRow = document.createElement('div');
-        srcRow.className = 'prop-row';
-        const srcLbl = document.createElement('label');
-        srcLbl.className = 'prop-label'; srcLbl.textContent = 'Source';
-        const srcSel = document.createElement('select');
-        srcSel.className = 'prop-select';
-        AUDIO_SOURCES.forEach(s => {
-            const o = document.createElement('option');
-            o.value = o.textContent = s;
-            srcSel.appendChild(o);
-        });
-        srcSel.value = binding.source;
-        srcSel.addEventListener('change', () => { binding.source = srcSel.value; save(); });
-        srcRow.appendChild(srcLbl); srcRow.appendChild(srcSel);
-        audioSection.appendChild(srcRow);
-
-        // Curve select
-        const curveRow = document.createElement('div');
-        curveRow.className = 'prop-row';
-        const curveLbl = document.createElement('label');
-        curveLbl.className = 'prop-label'; curveLbl.textContent = 'Curve';
-        const curveSel = document.createElement('select');
-        curveSel.className = 'prop-select';
-        CURVES.forEach(c => {
-            const o = document.createElement('option');
-            o.value = o.textContent = c;
-            curveSel.appendChild(o);
-        });
-        curveSel.value = binding.curve;
-        curveSel.addEventListener('change', () => { binding.curve = curveSel.value; save(); });
-        curveRow.appendChild(curveLbl); curveRow.appendChild(curveSel);
-        audioSection.appendChild(curveRow);
-
-        // Min slider
-        const minRow = document.createElement('div');
-        minRow.className = 'prop-row';
-        const minLbl = document.createElement('label');
-        minLbl.className = 'prop-label'; minLbl.textContent = 'Min';
-        const minWrap = document.createElement('div');
-        minWrap.className = 'prop-slider-wrap';
-        const minSlider = document.createElement('input');
-        minSlider.type = 'range'; minSlider.className = 'prop-slider';
-        minSlider.min = range.min; minSlider.max = range.max; minSlider.step = 0.001;
-        minSlider.value = binding.min;
-        const minNum = document.createElement('input');
-        minNum.type = 'number'; minNum.className = 'prop-number';
-        minNum.step = 0.001; minNum.value = binding.min;
-        minSlider.addEventListener('input', () => {
-            binding.min = parseFloat(minSlider.value); minNum.value = binding.min; save();
-        });
-        minNum.addEventListener('input', () => {
-            binding.min = parseFloat(minNum.value); minSlider.value = binding.min; save();
-        });
-        minWrap.appendChild(minSlider); minWrap.appendChild(minNum);
-        minRow.appendChild(minLbl); minRow.appendChild(minWrap);
-        audioSection.appendChild(minRow);
-
-        // Max slider
-        const maxRow = document.createElement('div');
-        maxRow.className = 'prop-row';
-        const maxLbl = document.createElement('label');
-        maxLbl.className = 'prop-label'; maxLbl.textContent = 'Max';
-        const maxWrap = document.createElement('div');
-        maxWrap.className = 'prop-slider-wrap';
-        const maxSlider = document.createElement('input');
-        maxSlider.type = 'range'; maxSlider.className = 'prop-slider';
-        maxSlider.min = range.min; maxSlider.max = range.max; maxSlider.step = 0.001;
-        maxSlider.value = binding.max;
-        const maxNum = document.createElement('input');
-        maxNum.type = 'number'; maxNum.className = 'prop-number';
-        maxNum.step = 0.001; maxNum.value = binding.max;
-        maxSlider.addEventListener('input', () => {
-            binding.max = parseFloat(maxSlider.value); maxNum.value = binding.max; save();
-        });
-        maxNum.addEventListener('input', () => {
-            binding.max = parseFloat(maxNum.value); maxSlider.value = binding.max; save();
-        });
-        maxWrap.appendChild(maxSlider); maxWrap.appendChild(maxNum);
-        maxRow.appendChild(maxLbl); maxRow.appendChild(maxWrap);
-        audioSection.appendChild(maxRow);
+        valueRow.appendChild(lbl);
+        valueRow.appendChild(wrap);
+        container.appendChild(valueRow);
 
         container.refreshFromBinding = () => {
-            if (binding.mode === 'constant') {
-                cSlider.value = binding.value;
-                cNum.value    = binding.value;
-            }
+            cSlider.value = binding.value;
+            cNum.value    = binding.value;
         };
         return container;
     }
@@ -1616,12 +2011,26 @@ function renderObjectProperties(obj, layer) {
 
     // ── Image-specific ──────────────────────────
     if (obj.type === 'image') {
-        section('Image');
+        section('Media');
 
-        const imgRow = row('Image');
-        imgRow.appendChild(createPreviewArea('bg', obj.imageName, name => {
-            obj.imageName = name; save();
-        }));
+        selectInput('Type', ['image', 'video'],
+            () => obj.mediaType ?? 'image',
+            v => { obj.mediaType = v; renderObjectProperties(obj, layer); });
+
+        if ((obj.mediaType ?? 'image') === 'video') {
+            const vRow = row('Video');
+            vRow.appendChild(createPreviewArea('video', obj.videoName, name => {
+                obj.videoName = name; save();
+            }));
+            slider('Playback Rate', 0.1, 4, 0.05,
+                () => obj.playbackRate ?? 1,
+                v => { obj.playbackRate = v; });
+        } else {
+            const imgRow = row('Image');
+            imgRow.appendChild(createPreviewArea('bg', obj.imageName, name => {
+                obj.imageName = name; save();
+            }));
+        }
 
         slider('Opacity', 0, 1, 0.01, () => obj.opacity ?? 1, v => { obj.opacity = v; });
 
@@ -1696,8 +2105,14 @@ function onAddWave(layer, data) {
 
 function onAddImage(layer, data) {
     const fillObj     = new FillObject();
-    fillObj.name      = data['Name'] || 'Image';
-    fillObj.imageName = data['Image'] || null;
+    const type        = data['Type'] || 'image';
+    fillObj.name      = data['Name'] || (type === 'video' ? 'Video' : 'Image');
+    fillObj.mediaType = type;
+    if (type === 'video') {
+        fillObj.videoName = data['Video'] || null;
+    } else {
+        fillObj.imageName = data['Image'] || null;
+    }
     builder.addImageToLayer(layer.id, fillObj);
     renderObjectList(layer);
     saveAllToDB();
@@ -1760,7 +2175,8 @@ document.getElementById('audio-file').addEventListener('change', async (e) => {
 let materialPreviews = generateMaterialPreviews();
 let modelPreviews    = generateModelPreviews();
 let ppPreviews;
-const bgPreviews     = Promise.resolve(PRESETS.BG_CATALOGUE.map(e => ({ name: e.name, url: e.path })));
+const bgPreviews = () => PRESETS.BG_CATALOGUE.map(e => ({ name: e.name, url: e.path }));
+const videoPreviews = () => (PRESETS.VIDEO_CATALOGUE || []).map(e => ({ name: e.name, url: e.path, isVideo: true }));
 
 function createPreviewArea(type, currentValue, onChange) {
     const grid = document.createElement('div');
@@ -1768,18 +2184,21 @@ function createPreviewArea(type, currentValue, onChange) {
 
     const promise = type === 'material' ? materialPreviews
                   : type === 'model'    ? modelPreviews
-                  : type === 'bg'       ? bgPreviews
+                  : type === 'bg'       ? bgPreviews()
+                  : type === 'video'    ? videoPreviews()
                   : ppPreviews;
     Promise.resolve(promise).then(items => {
-        items.forEach(({ name, url }) => {
+        items.forEach(({ name, url, isVideo }) => {
             const item = document.createElement('div');
             item.className = 'preview-item';
             if (name === currentValue) item.classList.add('selected');
             item.title = name;
 
-            const img = document.createElement(url ? 'img' : 'div');
+            const useVideo = isVideo || type === 'video';
+            const img = document.createElement(useVideo ? 'video' : (url ? 'img' : 'div'));
             img.className = 'preview-img';
             if (url) img.src = url;
+            if (useVideo) { img.muted = true; img.loop = true; img.playsInline = true; img.autoplay = true; }
             item.appendChild(img);
 
             const label = document.createElement('div');
@@ -1863,8 +2282,10 @@ window.addEventListener('load', async () => {
     if (lastPlaying) loadAudioFromRecord(lastPlaying);
 
     // Tab switching
-    document.getElementById('oe-btn').addEventListener('click',   () => switchTab('oe'));
-    document.getElementById('pp-editor').addEventListener('click', () => switchTab('pp'));
+    document.getElementById('oe-btn').addEventListener('click',     () => switchTab('oe'));
+    document.getElementById('pp-editor').addEventListener('click',  () => switchTab('pp'));
+    document.getElementById('anim-btn').addEventListener('click',   () => switchTab('anim'));
+    requestAnimationFrame(_updateTabPill);
 
 });
 

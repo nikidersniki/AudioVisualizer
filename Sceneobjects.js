@@ -242,10 +242,13 @@ export class WaveObject extends SceneObject {
 export class FillObject extends SceneObject {
     constructor() {
         super('image');
-        this.name       = 'Image';
-        this.imageName  = null;
-        this.audioScale = new PropertyBinding(1);
-        this.opacity    = 1;
+        this.name         = 'Image';
+        this.mediaType    = 'image';   // 'image' | 'video'
+        this.imageName    = null;
+        this.videoName    = null;
+        this.playbackRate = 1;
+        this.audioScale   = new PropertyBinding(1);
+        this.opacity      = 1;
     }
 
     applyBindings(audioData) {

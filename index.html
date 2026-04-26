@@ -18,12 +18,16 @@
     <header>
       <div id="header-buttons">
         <input type="file" id="file-input" accept=".json" style="display:none">
+        <input type="file" id="resource-input" accept="image/*,video/*,audio/*" multiple style="display:none">
+        <div id="file-new" class="Btn">New Project</div>
         <div id="file-open" class="Btn">Open File</div>
         <div id="file-save" class="Btn">Save File</div>
+        <div id="add-resources" class="Btn">Add Resources</div>
       </div>
       <div class="h2">Revisualize 3D</div>
     </header>
     <main>
+      <div id="drag-drop"></div>
       <canvas id="three-canvas"></canvas>
 
       <div id="progress-bar-container">
@@ -67,6 +71,7 @@
           <div id="editor-switch-pill"></div>
           <div id="oe-btn" class="switch-tab selected">Object Editor</div>
           <div id="pp-editor" class="switch-tab">Post Processing</div>
+          <div id="anim-btn" class="switch-tab">Animation</div>
         </div>
         <div id="layers">
           <div id="layer-header">
@@ -86,6 +91,10 @@
           <div id="pp-top-buttons"></div>
           <div id="pp-layer-list"></div>
           <div id="pp-layer-properties"></div>
+        </div>
+        <div id="anim-section" style="display:none">
+          <div class="h2">Animated Properties</div>
+          <div id="anim-list"></div>
         </div>
       </div>
 

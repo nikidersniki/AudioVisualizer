@@ -1,7 +1,7 @@
 import {
     Scene, PerspectiveCamera, WebGLRenderer,
     MeshNormalMaterial, MeshBasicMaterial, MeshStandardMaterial,
-    PointLight, DynamicDrawUsage, TextureLoader,
+    PointLight, DynamicDrawUsage, TextureLoader, VideoTexture,
     EquirectangularReflectionMapping,
     WebGLRenderTarget, OrthographicCamera, Mesh, PlaneGeometry,
     CustomBlending, OneFactor, OneMinusSrcAlphaFactor,
@@ -27,7 +27,6 @@ export class PRESETS{
         { name: 'Flare', path: './Graphics/bg/Flare.jpg' },
         { name: 'Pattern',  path: './Graphics/bg/Pattern.png'  },
     ];
-
     static HDRI_CATALOGUE = [
         { name: 'Pond Bridge Night',  path: './Graphics/hdri/pond_bridge_night_1k.exr'          },
         { name: 'Industrial Sunset',  path: './Graphics/hdri/industrial_sunset_02_puresky_1k.exr'},
@@ -35,7 +34,6 @@ export class PRESETS{
         { name: 'Studio',             path: './Graphics/hdri/studio_small_02_1k.exr'             },
         { name: 'Winter Evening',     path: './Graphics/hdri/winter_evening_1k.exr'              },
     ];
-
     static MODEL_CATALOGUE = [
         { name: 'duck',       path: './models/duck-plush/source/Duck.fbx', scale: [0.01, 0.01, 0.01] },
         { name: 'eco-sphere', path: './models/EcoSphrere.fbx',             scale: [0.01, 0.01, 0.01] },
@@ -455,12 +453,54 @@ export class SceneBuilder {
         const opacity = fillObj.opacity ?? 1;
         if (mat.opacity !== opacity) { mat.opacity = opacity; mat.transparent = opacity < 1; mat.needsUpdate = true; }
 
-        if (fillObj.imageName && mesh._imageLoadedName !== fillObj.imageName) {
-            mesh._imageLoadedName = fillObj.imageName;
-            const entry = PRESETS.BG_CATALOGUE.find(e => e.name === fillObj.imageName);
-            if (entry) new TextureLoader().load(entry.path, tex => { mat.map = tex; mat.needsUpdate = true; });
-        } else if (!fillObj.imageName && mat.map) {
-            mat.map = null; mat.needsUpdate = true;
+        const isVideo = fillObj.mediaType === 'video';
+
+        if (isVideo) {
+            if (mesh._imageLoadedName) {
+                mesh._imageLoadedName = null;
+                if (mat.map && !mesh._video) { mat.map = null; mat.needsUpdate = true; }
+            }
+            if (fillObj.videoName && mesh._videoLoadedName !== fillObj.videoName) {
+                const entry = (PRESETS.VIDEO_CATALOGUE || []).find(e => e.name === fillObj.videoName);
+                if (entry) {
+                    mesh._videoLoadedName = fillObj.videoName;
+                    if (mesh._video) { mesh._video.pause(); mesh._video.src = ''; }
+                    const v = document.createElement('video');
+                    v.src = entry.path;
+                    v.loop = true;
+                    v.muted = true;
+                    v.playsInline = true;
+                    v.crossOrigin = 'anonymous';
+                    v.playbackRate = fillObj.playbackRate ?? 1;
+                    v.play().catch(() => {});
+                    mesh._video = v;
+                    mat.map = new VideoTexture(v);
+                    mat.needsUpdate = true;
+                }
+            } else if (!fillObj.videoName && mesh._video) {
+                mesh._video.pause(); mesh._video.src = '';
+                mesh._video = null; mesh._videoLoadedName = null;
+                mat.map = null; mat.needsUpdate = true;
+            }
+            if (mesh._video) {
+                const r = fillObj.playbackRate ?? 1;
+                if (mesh._video.playbackRate !== r) mesh._video.playbackRate = r;
+            }
+        } else {
+            if (mesh._video) {
+                mesh._video.pause(); mesh._video.src = '';
+                mesh._video = null; mesh._videoLoadedName = null;
+                mat.map = null; mat.needsUpdate = true;
+            }
+            if (fillObj.imageName && mesh._imageLoadedName !== fillObj.imageName) {
+                const entry = PRESETS.BG_CATALOGUE.find(e => e.name === fillObj.imageName);
+                if (entry) {
+                    mesh._imageLoadedName = fillObj.imageName;
+                    new TextureLoader().load(entry.path, tex => { mat.map = tex; mat.needsUpdate = true; });
+                }
+            } else if (!fillObj.imageName && mat.map) {
+                mat.map = null; mat.needsUpdate = true;
+            }
         }
     }
 
@@ -472,7 +512,9 @@ export class SceneBuilder {
         const entry = PRESETS.HDRI_CATALOGUE.find(e => e.name === name);
         if (!entry) return;
         this.selectedHDRI = name;
-        new EXRLoader().load(entry.path, tex => {
+        const isExr = entry.path.endsWith('.exr');
+        const loader = isExr ? new EXRLoader() : new TextureLoader();
+        loader.load(entry.path, tex => {
             tex.mapping = EquirectangularReflectionMapping;
             PRESETS.materials.standard.envMap = tex;
             PRESETS.materials.standard.needsUpdate = true;
