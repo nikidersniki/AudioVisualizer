@@ -1172,3 +1172,306 @@ header .h2 {
     padding: 6px 0 20px;
     border-top: 1px solid var(--border);
 }
+
+/* ════════════════════════════════════════════════════════════════
+   MOBILE
+   ════════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+    html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        -webkit-text-size-adjust: 100%;
+        touch-action: manipulation;
+    }
+
+    /* ── Header ── */
+    header {
+        height: auto;
+        min-height: 32px;
+        padding: 4px 6px;
+        flex-direction: column;
+        gap: 4px;
+    }
+    header .h2 {
+        font-size: 1.1rem;
+        order: -1;
+    }
+    #header-buttons {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 4px;
+        width: 100%;
+    }
+    #header-buttons .Btn {
+        font-size: 0.6rem;
+        padding: 4px 6px;
+    }
+
+    /* ── Mobile bottom drawer ── */
+    #mobile-drawer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 80vh;
+        z-index: 10003;
+        background: var(--pannel-bg);
+        backdrop-filter: var(--panel-blur);
+        border-top: 1px solid var(--border-bright);
+        border-top-left-radius: 8px;
+        border-top-right-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        transform: translateY(calc(100% - var(--peek, 76px)));
+        transition: transform 0.25s ease;
+        font-family: var(--font-mono);
+        color: var(--text);
+        --peek: 76px;
+    }
+    #mobile-drawer.open {
+        transform: translateY(0);
+    }
+    #drawer-handle {
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: grab;
+        flex-shrink: 0;
+    }
+    #drawer-handle:active { cursor: grabbing; }
+    .drawer-grip {
+        width: 48px;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--text-faint);
+        opacity: 0.6;
+    }
+    #drawer-tabs {
+        display: flex;
+        flex-direction: row;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+    }
+    .drawer-tab {
+        flex: 1;
+        text-align: center;
+        padding: 10px 8px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        cursor: pointer;
+        user-select: none;
+        border-bottom: 2px solid transparent;
+        transition: color 0.15s, border-color 0.15s;
+    }
+    .drawer-tab.selected {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+    }
+    #drawer-body {
+        flex: 1;
+        overflow-y: auto;
+        position: relative;
+    }
+    #drawer-body #controlls,
+    #drawer-body #player {
+        position: static;
+        top: auto;
+        right: auto;
+        left: auto;
+        bottom: auto;
+        width: 100%;
+        max-width: none;
+        min-width: 0;
+        max-height: none;
+        border: none;
+        border-radius: 0;
+        background: transparent;
+        backdrop-filter: none;
+    }
+    #drawer-body .drawer-hidden {
+        display: none !important;
+    }
+
+    .hide-button { display: none !important; }
+
+    /* ── Progress bar above drawer peek ── */
+    #progress-bar-container {
+        position: static;
+        background-color: transparent;
+        backdrop-filter: none;
+        border-top:0;
+        border-bottom: 1px solid var(--border);
+        padding: 24px 0 6px;
+        z-index: 10004;
+    }
+    #progress-bar {
+        position: static;
+        width: calc(100% - 12px);
+        margin: 0 6px;
+        left: auto;
+        right: auto;
+        bottom: auto;
+        height: 4px;
+    }
+    #pause-btn {
+        font-size: 1.1rem;
+        padding: 4px 6px;
+    }
+    #track-name {
+        font-size: 0.9rem;
+        bottom: auto;
+    }
+
+    /* ── Popup full screen ── */
+    .popup {
+        width: 96vw;
+        max-width: 96vw;
+        max-height: 90vh;
+    }
+    .popup-title-text {
+        font-size: 1.1rem;
+        padding: 10px 12px 8px;
+    }
+    .popup-input-box > div:not(.preview-grid):not(.preview-field) {
+        padding: 8px 12px;
+        flex-wrap: wrap;
+    }
+    .popup-input-box .h2 {
+        min-width: 0;
+        width: 100%;
+    }
+    .popup-input-box input,
+    .popup-input-box select {
+        width: 100%;
+        font-size: 0.85rem;
+        padding: 6px 8px;
+    }
+    .popup-button-box .big-Btn {
+        font-size: 0.75rem;
+        padding: 10px 8px;
+    }
+
+    /* ── Preview grid: bigger thumbs, fewer per row ── */
+    .preview-img {
+        width: 22vw;
+        max-width: 110px;
+    }
+    .preview-label {
+        font-size: 0.65rem;
+    }
+
+    /* ── Property rows wrap label above input ── */
+    .prop-row {
+        flex-wrap: wrap;
+        padding: 4px 8px;
+        min-height: 0;
+    }
+    .prop-label {
+        font-size: 0.7rem;
+        min-width: 0;
+        width: auto;
+    }
+    .prop-input,
+    .prop-select {
+        font-size: 0.8rem;
+        padding: 5px 6px;
+        min-height: 28px;
+    }
+    .prop-color {
+        width: 44px;
+        height: 28px;
+    }
+    .prop-checkbox {
+        width: 20px;
+        height: 20px;
+    }
+    .custom-slider {
+        height: 24px;
+    }
+    .custom-slider-value {
+        font-size: 0.75rem;
+    }
+
+    /* ── Buttons larger tap target ── */
+    .Btn {
+        font-size: 0.7rem;
+        padding: 6px 10px;
+    }
+    .big-Btn {
+        font-size: 0.85rem;
+        padding: 10px 12px;
+    }
+    .image-button {
+        width: 26px;
+        height: 26px;
+    }
+    .prop-animate-btn {
+        width: 24px;
+        height: 24px;
+        font-size: 0.8rem;
+    }
+
+    /* ── Editor switch tabs ── */
+    .switch-tab {
+        font-size: 0.65rem;
+        padding: 7px 4px;
+    }
+
+    /* ── List buttons ── */
+    .list-button {
+        font-size: 0.75rem;
+        padding: 7px 8px;
+    }
+
+    /* ── Headings ── */
+    .h1 {
+        font-size: 1.2rem;
+        padding: 5px 8px 3px;
+    }
+
+    /* ── Drag drop overlay text smaller ── */
+    #drag-drop::after {
+        font-size: 1.8rem;
+        padding: 24px 32px;
+        letter-spacing: 0.15em;
+    }
+
+    /* ── Layer opacity slider tap area ── */
+    .layer-opacity-slider {
+        height: 6px;
+    }
+}
+
+/* ── Very narrow phones ── */
+@media (max-width: 420px) {
+    #controlls, #player {
+        width: 96vw;
+        max-width: 96vw;
+        max-height: 50vh;
+    }
+    #hide-controlls, #hide-player {
+        bottom: calc(50vh + 64px);
+    }
+    header .h2 {
+        font-size: 0.95rem;
+    }
+    #header-buttons .Btn {
+        font-size: 0.55rem;
+        padding: 3px 5px;
+    }
+}
+
+/* ── Touch device pointer hints ── */
+@media (hover: none) {
+    .Btn:hover,
+    .image-button:hover,
+    .list-button:hover,
+    .preview-item:hover {
+        background: inherit;
+    }
+}

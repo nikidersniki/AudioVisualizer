@@ -655,7 +655,7 @@ function pauseAudio() {
 
 function resumeAudio() {
     if (isPlaying || !audioBuffer || !audioContext) return;
-    playAudioFromTime(pauseTime/2);
+    playAudioFromTime(pauseTime);
     updatePauseBtn();
 }
 
@@ -946,8 +946,7 @@ const durationDisplay     = document.getElementById('duration');
 function updateProgressBar() {
     if (isDragging || !audioBuffer || !audioContext) return;
     let currentTime;
-    if (isPlaying && !audioSource)  currentTime = audioContext.currentTime - startTime;
-    else if (isPlaying && audioSource) currentTime = audioContext.currentTime - startTime + pauseTime;
+    if (isPlaying) currentTime = audioContext.currentTime - startTime;
     if (currentTime === undefined) return;
 
     const dur = audioBuffer.duration;
@@ -969,7 +968,7 @@ document.addEventListener('mouseup', () => { isDragging = false; });
 progressBar.addEventListener('click', (e) => {
     if (!audioBuffer) return;
     const rect    = progressBar.getBoundingClientRect();
-    const percent = (((e.clientX/2) - rect.left) / rect.width * 100).toFixed(2);
+    const percent = ((e.clientX - rect.left) / rect.width * 100).toFixed(2);
     playAudioFromTime((percent / 100) * audioBuffer.duration);
 });
 
