@@ -53,29 +53,40 @@ export class PRESETS{
 export class SceneBuilder {
     constructor(canvas) {
         // ── Renderer / camera / scene ──────────────────
-        this.width  = window.innerWidth;
-        this.height = window.innerHeight;
+        const _measure = () => {
+            const w = canvas.clientWidth  || window.innerWidth;
+            const h = canvas.clientHeight || window.innerHeight;
+            return { w, h };
+        };
+        let _m = _measure();
+        this.width  = _m.w;
+        this.height = _m.h;
 
         this.camera   = new PerspectiveCamera(70, this.width / this.height, 0.01, 1000);
         this.camera.position.z = 3;
 
         this.renderer = new WebGLRenderer({ antialias: true, canvas });
-        this.renderer.setSize(this.width, this.height);
+        this.renderer.setSize(this.width, this.height, false);
         this.renderer.setClearColor(0x000000, 1);
         this.renderer.autoClear = false;
 
-        window.addEventListener('resize', () => {
-            this.width  = window.innerWidth;
-            this.height = window.innerHeight;
+        const _onResize = () => {
+            const m = _measure();
+            this.width  = m.w;
+            this.height = m.h;
             this.camera.aspect = this.width / this.height;
             this.camera.updateProjectionMatrix();
-            this.renderer.setSize(this.width, this.height);
+            this.renderer.setSize(this.width, this.height, false);
             this._layerTargets.forEach(t => t.setSize(this.width, this.height));
             this._finalTarget.setSize(this.width, this.height);
             this._layerPPTarget.setSize(this.width, this.height);
             this._postPipeline?.resize(this.width, this.height);
             this._layerPPPipelines.forEach(p => p.resize(this.width, this.height));
-        });
+        };
+        window.addEventListener('resize', _onResize);
+        if (typeof ResizeObserver !== 'undefined') {
+            new ResizeObserver(_onResize).observe(canvas);
+        }
 
         this.selectedHDRI = PRESETS.HDRI_CATALOGUE[0].name;
         this.setHDRI(this.selectedHDRI);

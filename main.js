@@ -1063,6 +1063,7 @@ function switchPPContext(id) {
     // Update title and Add Post FX button
     const title = id === 'global' ? 'Global' : (builder.layers.find(l => l.id === id)?.name ?? id);
     document.getElementById('pp-context-title').textContent = title;
+    updatePPPills();
     const btnBox = document.getElementById('pp-top-buttons');
     btnBox.innerHTML = '';
     const addBtn = document.createElement('div');
@@ -1349,15 +1350,18 @@ function addLayerElement(layer) {
 }
 
 const currentLayerControllBox = document.getElementById('current-layer-controls');
+let currentSelectedLayerId = null;
 function selectLayer(layer) {
     selectedObject = null;
     builder.detachGizmo();
+    currentSelectedLayerId = layer?.id ?? null;
 
     document.querySelectorAll('.layer-item').forEach(el => {
         el.classList.toggle('selected', el.dataset.layerId === layer.id);
     });
 
     currentLayerControllBox.children[0].textContent = layer.name;
+    updatePPPills();
 
     const buttonBox = document.getElementById('layerTopButtons');
     buttonBox.innerHTML = '';
@@ -2138,7 +2142,9 @@ document.getElementById('audio-volume').addEventListener('input', (e) => {
 });
 
 document.getElementById('add-layer').addEventListener('click', async () => {
-    const name = prompt('Enter layer name:');
+    const data = await spawnPopup('New Layer', [['Name', 'text', true]]).catch(() => null);
+    if (!data) return;
+    const name = (data.Name || '').trim();
     if (!name) return;
     const layer = new Layer(name, false);
     builder.addLayer(layer);
@@ -2149,11 +2155,23 @@ document.getElementById('add-layer').addEventListener('click', async () => {
 
 document.getElementById('audio-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
+    e.target.value = '';
     if (!file) return;
-    const trackId = await saveAudioFile(file);
 
     const songName = await readID3Title({ file });
     const name = songName || file.name;
+
+    const dup = allTracks.find(t =>
+        t.name === name &&
+        t.file?.size === file.size &&
+        t.file?.type === file.type
+    );
+    if (dup) {
+        loadAudioFromRecord(dup);
+        return;
+    }
+
+    const trackId = await saveAudioFile(file);
     const record = { id: trackId, file, name, type: file.type, isPlaying: false };
     allTracks.push(record);
 
@@ -2286,7 +2304,31 @@ window.addEventListener('load', async () => {
     document.getElementById('anim-btn').addEventListener('click',   () => switchTab('anim'));
     requestAnimationFrame(_updateTabPill);
 
+    // PP context pills
+    const pillGlobal = document.getElementById('pp-pill-global');
+    const pillLayer  = document.getElementById('pp-pill-layer');
+    pillGlobal?.addEventListener('click', () => switchPPContext('global'));
+    pillLayer?.addEventListener('click', () => {
+        if (!currentSelectedLayerId) return;
+        switchPPContext(currentSelectedLayerId);
+    });
+    updatePPPills();
 });
+
+function updatePPPills() {
+    const pillGlobal = document.getElementById('pp-pill-global');
+    const pillLayer  = document.getElementById('pp-pill-layer');
+    if (!pillGlobal || !pillLayer) return;
+
+    const layer = currentSelectedLayerId
+        ? builder.layers.find(l => l.id === currentSelectedLayerId)
+        : null;
+    pillLayer.textContent = layer ? `Layer: ${layer.name}` : 'Layer: —';
+    pillLayer.classList.toggle('is-disabled', !layer);
+
+    pillGlobal.classList.toggle('selected', ppContextId === 'global');
+    pillLayer.classList.toggle('selected',  ppContextId !== 'global' && ppContextId === currentSelectedLayerId);
+}
 
 
 

@@ -161,6 +161,7 @@
     }
 
     function apply() {
+        if (window.__GL_ACTIVE__) return;
         if (MQ.matches) {
             build();
             reparent();

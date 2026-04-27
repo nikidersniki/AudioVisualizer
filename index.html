@@ -11,9 +11,12 @@
     }
     </script>
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/dist/css/goldenlayout-base.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/dist/css/themes/goldenlayout-dark-theme.css">
     <script src="SoundNameReader.js"></script>
     <script type="module" src="main.js"></script>
     <script defer src="mobile-ui.js"></script>
+    <script type="module" src="gl-ui.js"></script>
     <link rel="stylesheet" type="text/css" href="style.css">
   </head>
   <body>
@@ -25,9 +28,14 @@
         <div id="file-open" class="Btn">Open File</div>
         <div id="file-save" class="Btn">Save File</div>
         <div id="add-resources" class="Btn">Add Resources</div>
+        <div id="windows-menu" class="Btn-dropdown">
+          <div id="windows-menu-btn" class="Btn">Windows ▾</div>
+          <div id="windows-menu-list"></div>
+        </div>
       </div>
       <div class="h2">Revisualize 3D</div>
     </header>
+    <div id="gl-container"></div>
     <main>
       <div id="drag-drop"></div>
       <canvas id="three-canvas"></canvas>
@@ -48,12 +56,7 @@
         <div id="track-name">No Track Loaded</div>
       </div>
 
-      <div id="hide-controlls" class="hide-button image-button"></div>
-      <div id="controlls">
-        <div class="h1">Controls</div>
-        <label>Audio Volume
-          <input type="range" id="audio-volume" min="0.1" max="2" step="0.1" value="1">
-        </label>
+      <div id="project-settings">
         <div id="scene-settings">
           <div class="h2 prop-section-title prop-section-collapsible" id="scene-settings-header">
             <span>Scene Settings</span><span class="prop-section-arrow" style="transform:rotate(-90deg)">▾</span>
@@ -69,6 +72,32 @@
             </div>
           </div>
         </div>
+        <div id="viewport-settings">
+          <div class="h2 prop-section-title">Viewport</div>
+          <div class="prop-row">
+            <label class="prop-label">Fixed Aspect</label>
+            <input type="checkbox" id="viewport-fixed-toggle">
+          </div>
+          <div class="prop-row">
+            <label class="prop-label">Aspect Ratio</label>
+            <select id="viewport-aspect-select" class="prop-select">
+              <option value="16:9">16:9</option>
+              <option value="9:16">9:16</option>
+              <option value="4:3">4:3</option>
+              <option value="3:4">3:4</option>
+              <option value="21:9">21:9</option>
+              <option value="1:1">1:1</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div id="hide-controlls" class="hide-button image-button"></div>
+      <div id="controlls">
+        <div class="h1">Controls</div>
+        <label>Audio Volume
+          <input type="range" id="audio-volume" min="0.1" max="2" step="0.1" value="1">
+        </label>
         <div id="editorSwitch">
           <div id="editor-switch-pill"></div>
           <div id="oe-btn" class="switch-tab selected">Object Editor</div>
@@ -89,6 +118,10 @@
           <div id="object-properties"></div>
         </div>
         <div id="pp-section" style="display:none">
+          <div id="pp-context-pills">
+            <div id="pp-pill-global" class="pp-pill selected">Global</div>
+            <div id="pp-pill-layer" class="pp-pill is-disabled">Layer: —</div>
+          </div>
           <div class="h2" id="pp-context-title">Global</div>
           <div id="pp-top-buttons"></div>
           <div id="pp-layer-list"></div>
