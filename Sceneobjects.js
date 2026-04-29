@@ -215,12 +215,14 @@ export class WaveObject extends SceneObject {
         // 'circular' | 'linear' | 'linear-up' | 'bars' | 'bars-both' | 'line'
         this.waveType = 'circular';
         this.segments = 64;
-        this.color    = '#ffffff';
+        this.color     = '#ffffff'; // line color
+        this.fillColor = '#ffffff';
+        this.fill      = false;
         this.amplitude   = new PropertyBinding(0.5);
         this.radius      = new PropertyBinding(1);   // circular: base ring radius
         this.width       = new PropertyBinding(2);   // linear / line: horizontal span
         this.barSpacing  = new PropertyBinding(0.05); // bars / bars-both: distance between bar centers
-        this.sampleCount = 512;                      // how many freq bins to read (1–analyser max)
+        this.sampleCount = 100;                      // fixed freq-bin count
         this.lineWidth   = 5;                        // screen-space line width in pixels
         this.opacity     = 0.5;
         this.colorReactive   = false;
@@ -232,6 +234,7 @@ export class WaveObject extends SceneObject {
     static fromJSON(d) {
         const obj = new WaveObject();
         obj._restoreBindings(d);
+        obj.sampleCount = 100;
         return obj;
     }
 }

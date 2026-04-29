@@ -147,7 +147,7 @@ header .h2 {
     background: var(--bg-lift);
     border-radius: 0;
     cursor: pointer;
-    outline: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
 }
 
 #progress-fill {
@@ -195,45 +195,20 @@ header .h2 {
    PANELS
    ════════════════════════════════════════════════════════════════ */
 #controlls, #player {
-    background: var(--pannel-bg);
-    backdrop-filter: var(--panel-blur);
-    position: absolute;
-    top: 32px;
-    z-index: 10000;
     display: flex;
     flex-direction: column;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
     font-family: var(--font-mono);
     color: var(--text);
-    max-height: calc(100vh - 80px);
-    overflow-y: auto;
-    scrollbar-width: none;        /* Firefox */
-    -ms-overflow-style: none;     /* IE/Edge */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
 }
 #controlls::-webkit-scrollbar, #player::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-    display: none;                /* Chrome/Safari */
+    width: 0; height: 0; display: none;
 }
-
-#controlls {
-    right: 0;
-    border: 1px solid var(--border-bright);
-    border-width: 0 0 1px 1px;
-    border-bottom-left-radius: var(--radius);
-    min-width: 260px;
-    max-width: 320px;
-    padding-bottom: 12px;
-}
-
-#player {
-    left: 0;
-    border: 1px solid var(--border-bright);
-    border-width: 0 1px 1px 0;
-    border-bottom-right-radius: var(--radius);
-    min-width: 180px;
-    padding-bottom: 8px;
-    text-align: center;
-}
+#player { text-align: center; }
 
 #controlls > label {
     display: flex;
@@ -589,21 +564,7 @@ header .h2 {
 /* ════════════════════════════════════════════════════════════════
    HIDE BUTTONS
    ════════════════════════════════════════════════════════════════ */
-.hide-button {
-    position: absolute;
-    z-index: 10001;
-    width: 20px; height: 20px;
-    background-image: url('Graphics/hide-svgrepo-com.svg');
-    background-size: cover;
-    background-color: transparent;
-    cursor: pointer;
-    filter: invert(1);
-    opacity: 0.4;
-    transition: opacity 0.15s;
-}
-.hide-button:hover { opacity: 1; }
-#hide-controlls { top: 38px; right: 6px; }
-#hide-player    { top: 38px; left:  6px; }
+.hide-button { display: none; }
 
 /* ════════════════════════════════════════════════════════════════
    LAYER CONTROLS
@@ -1493,15 +1454,8 @@ header .h2 {
 }
 body:not(.gl-mode) #gl-container { display: none; }
 
-/* Hide originals on desktop GL mode (those still in <main> as siblings) */
-.gl-mode main > #controlls,
-.gl-mode main > #drag-drop,
-.gl-mode main > #three-canvas,
-.gl-mode main > #player,
-.gl-mode main > #progress-bar-container,
-.gl-mode main > #now-playing,
-.gl-mode main > .hide-button,
-.gl-mode main > #editorSwitch { display: none; }
+main { display: none; }
+@media (max-width: 768px) { main { display: block; } }
 .gl-mode main { display: none; }
 
 /* Force editor sections visible in GL mode (they live in separate panels now) */
@@ -1513,20 +1467,6 @@ body:not(.gl-mode) #gl-container { display: none; }
 .gl-mode #editorSwitch { display: none !important; }
 .gl-mode .hide-button { display: none !important; }
 
-/* Override panel positioning when reparented into GL components */
-.gl-mode #controlls,
-.gl-mode #player {
-    position: static !important;
-    top: auto; left: auto; right: auto; bottom: auto;
-    width: 100%;
-    max-width: none;
-    min-width: 0;
-    max-height: none;
-    border: 0;
-    border-radius: 0;
-    height: 100%;
-    padding-bottom: 8px;
-}
 
 /* Panel host wrappers fill the GL component box */
 .gl-host-wrapper { display: flex; flex-direction: column; height: 100%; }
@@ -1567,6 +1507,15 @@ body:not(.gl-mode) #gl-container { display: none; }
     backdrop-filter: none;
     border: 0;
     padding: 18px 0 6px;
+}
+
+#freq-preview {
+    display: block;
+    width: 100%;
+    opacity: 0.5;
+    height: 30px;
+    background: transparent;
+    border: 0;
 }
 #progress-host > #progress-bar-container > #progress-bar {
     position: static; width: 100%; left: auto; right: auto; bottom: auto; height: 4px;

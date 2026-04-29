@@ -123,6 +123,7 @@ const sound    = new Audio(listener);
 const analyser = new AudioAnalyser(sound, 256);
 
 let audioBuffer = null;
+let syncedVideoObjId = null;
 let audioContext = null;
 let audioSource  = null;
 let startTime    = 0;
@@ -201,6 +202,8 @@ function serializeAll() {
     return [
         { id: 'global', name: 'Global', isGlobal: true, objects: [], ppLayers: globalPPLayers,
           bgColor: builder._bgColor, hdri: builder.selectedHDRI,
+          volume: Volume,
+          syncedVideoObjId,
           customCatalogues, animatedProperties },
         ...sceneLayers,
     ];
@@ -244,6 +247,13 @@ async function deserializeAll(data) {
         const el = document.getElementById('scene-hdri');
         if (el) el.value = globalEntry.hdri;
     }
+    if (typeof globalEntry?.volume === 'number') {
+        Volume = globalEntry.volume;
+        listener.setMasterVolume(Volume);
+        const v = document.getElementById('audio-volume');
+        if (v) v.value = Volume;
+    }
+    syncedVideoObjId = globalEntry?.syncedVideoObjId ?? null;
 
     // Restore global PP
     const globalCtx = ppContexts.get('global');
@@ -325,7 +335,7 @@ function toggleAnimatedProperty(objectId, key, label, range = { min: -10, max: 1
         if (found && found.obj[key]) found.obj[key].mode = 'audio';
     }
     saveAllToDB();
-    if (currentTab === 'anim') renderAnimationList();
+    renderAnimationList();
 }
 
 function _animPropRow(labelText, control) {
@@ -614,13 +624,67 @@ function formatTime(s) {
     return `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 }
 
+async function loadVideoAudioAsTrack(fillObj) {
+    const entry = (PRESETS.VIDEO_CATALOGUE || []).find(e => e.name === fillObj.videoName);
+    if (!entry) throw new Error('Video source not found');
+    const ctx = listener.context;
+    const res = await fetch(entry.path);
+    if (!res.ok) throw new Error('Failed to fetch video');
+    const buf = await res.arrayBuffer();
+    const decoded = await ctx.decodeAudioData(buf.slice(0));
+    if (!decoded || decoded.length === 0) throw new Error('Video has no audio');
+    applyAudioBuffer(decoded);
+}
+
+function notifyVideoAudio(msg) {
+    const bg = document.createElement('div');
+    bg.className = 'popup-bg';
+    const popup = document.createElement('div');
+    popup.className = 'popup';
+    const title = document.createElement('div');
+    title.className = 'h1 popup-title-text';
+    title.textContent = msg;
+    const ok = document.createElement('div');
+    ok.className = 'big-Btn';
+    ok.textContent = 'OK';
+    const buttonBox = document.createElement('div');
+    buttonBox.classList.add('popup-button-box');
+    buttonBox.appendChild(ok);
+    popup.appendChild(title);
+    popup.appendChild(buttonBox);
+    bg.appendChild(popup);
+    ok.addEventListener('click', () => bg.remove());
+    bg.addEventListener('click', e => { if (e.target === bg) bg.remove(); });
+    document.body.appendChild(bg);
+}
+
+function _syncVideoToAudio() {
+    if (!syncedVideoObjId || !audioBuffer || !audioContext) return;
+    let fillObj = null;
+    for (const layer of builder.layers) {
+        const o = layer.getObject(syncedVideoObjId);
+        if (o) { fillObj = o; break; }
+    }
+    const v = fillObj?.threeObject?._video;
+    if (!v) return;
+    if (v.muted === false) v.muted = true; // audio plays via the track; keep video silent
+    const target = isPlaying
+        ? Math.max(0, audioContext.currentTime - startTime)
+        : pauseTime;
+    if (Math.abs(v.currentTime - target) > 0.15) {
+        try { v.currentTime = Math.min(target, v.duration || target); } catch {}
+    }
+    if (isPlaying && v.paused) v.play().catch(() => {});
+    else if (!isPlaying && !v.paused) v.pause();
+}
+
 function applyAudioBuffer(buffer) {
     if (sound.isPlaying) { sound.onEnded = null; sound.stop(); }
     audioBuffer = buffer;
     audioSource = null;
     sound.setBuffer(buffer);
     sound.setLoop(false);
-    sound.setVolume(Volume);
+    listener.setMasterVolume(Volume);
     sound.onEnded = playNext;
     durationDisplay.textContent = formatTime(buffer.duration);
     audioContext = listener.context;
@@ -628,6 +692,100 @@ function applyAudioBuffer(buffer) {
     pauseTime = 0;
     isPlaying = true;
     sound.play();
+    _generateWaveformPeaks(buffer);
+    _drawWaveformPreview();
+}
+
+let _waveformPeaks = null;
+
+function _generateWaveformPeaks(buffer, buckets = 400) {
+    if (!buffer) { _waveformPeaks = null; return; }
+    const ch = buffer.numberOfChannels;
+    const len = buffer.length;
+    const samplesPerBucket = Math.max(1, Math.floor(len / buckets));
+    const peaks = new Float32Array(buckets);
+    const channels = [];
+    for (let c = 0; c < ch; c++) channels.push(buffer.getChannelData(c));
+    for (let b = 0; b < buckets; b++) {
+        const start = b * samplesPerBucket;
+        const end   = Math.min(start + samplesPerBucket, len);
+        let max = 0;
+        for (let c = 0; c < ch; c++) {
+            const data = channels[c];
+            for (let i = start; i < end; i++) {
+                const v = Math.abs(data[i]);
+                if (v > max) max = v;
+            }
+        }
+        peaks[b] = max;
+    }
+    let globalMax = 0;
+    for (let i = 0; i < buckets; i++) if (peaks[i] > globalMax) globalMax = peaks[i];
+    if (globalMax > 0) {
+        const inv = 1 / globalMax;
+        for (let i = 0; i < buckets; i++) peaks[i] *= inv;
+    }
+    _waveformPeaks = peaks;
+}
+
+function _drawWaveformPreview() {
+    const cv = _freqPreviewCanvas;
+    const ctx = _freqPreviewCtx;
+    if (!cv || !ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = cv.clientWidth, cssH = cv.clientHeight;
+    if (!cssW || !cssH) return;
+    const w = Math.round(cssW * dpr), h = Math.round(cssH * dpr);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    ctx.clearRect(0, 0, w, h);
+    if (!_waveformPeaks) return;
+    const peaks = _waveformPeaks;
+    const N = peaks.length;
+    const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#c8f035';
+
+    const buildPath = () => {
+        ctx.beginPath();
+        ctx.moveTo(0, h);
+        for (let i = 0; i < N; i++) {
+            const x = (i / (N - 1)) * w;
+            const y = h - peaks[i] * h;
+            ctx.lineTo(x, y);
+        }
+        ctx.lineTo(w, h);
+        ctx.closePath();
+    };
+
+    // Match the progress-bar fill (which has a CSS transition)
+    let progress = 0;
+    const fillEl = document.getElementById('progress-fill');
+    const barEl  = document.getElementById('progress-bar');
+    if (fillEl && barEl) {
+        const bw = barEl.getBoundingClientRect().width;
+        const fw = fillEl.getBoundingClientRect().width;
+        if (bw > 0) progress = Math.max(0, Math.min(1, fw / bw));
+    } else if (audioBuffer && audioContext) {
+        const cur = isPlaying
+            ? Math.max(0, audioContext.currentTime - startTime)
+            : pauseTime;
+        progress = Math.max(0, Math.min(1, cur / audioBuffer.duration));
+    }
+
+    // Unplayed portion in dark grey
+    ctx.fillStyle = '#3a3a3a';
+    buildPath();
+    ctx.fill();
+
+    // Played portion in accent
+    if (progress > 0) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, w * progress, h);
+        ctx.clip();
+        ctx.fillStyle = accent;
+        buildPath();
+        ctx.fill();
+        ctx.restore();
+    }
 }
 
 function setCurrentTrack(name) {
@@ -1233,6 +1391,22 @@ function renderPPLayerProperties(ppLayer) {
                 saveAllToDB();
             });
             rowEl.appendChild(inp);
+        } else if (def.type === 'select') {
+            const sel = document.createElement('select');
+            sel.className = 'prop-select';
+            (def.options ?? []).forEach(opt => {
+                const o = document.createElement('option');
+                if (typeof opt === 'object') { o.value = opt.value; o.textContent = opt.label ?? opt.value; }
+                else { o.value = opt; o.textContent = opt; }
+                sel.appendChild(o);
+            });
+            sel.value = ppLayer.properties[def.key];
+            sel.addEventListener('change', () => {
+                ppLayer.properties[def.key] = sel.value;
+                ppLayer.invalidateMaterial?.();
+                saveAllToDB();
+            });
+            rowEl.appendChild(sel);
         }
 
         panel.appendChild(rowEl);
@@ -1934,20 +2108,30 @@ function renderObjectProperties(obj, layer) {
             v  => { obj.waveType = v; save(); renderObjectProperties(obj, layer); }
         );
 
-        colorInput('Color', () => obj.color, v => { obj.color = v; });
+        colorInput('Line Color', () => obj.color, v => { obj.color = v; });
 
-        // Segments — integer, rebuilds geometry on change
-        const segRow = row('Segments');
-        const segNum = document.createElement('input');
-        segNum.type = 'number'; segNum.className = 'prop-number';
-        segNum.min = 2; segNum.max = 512; segNum.step = 1;
-        segNum.value = obj.segments;
-        segNum.addEventListener('change', () => {
-            obj.segments = Math.max(2, parseInt(segNum.value) || 2);
-            segNum.value = obj.segments;
-            save();
-        });
-        segRow.appendChild(segNum);
+        const fillSupported = ['linear','linear-up','line'].includes(obj.waveType);
+        if (fillSupported) {
+            const fillRow = row('Fill');
+            const fillInp = document.createElement('input');
+            fillInp.type = 'checkbox'; fillInp.className = 'prop-checkbox';
+            fillInp.checked = !!obj.fill;
+            fillInp.addEventListener('change', () => {
+                obj.fill = fillInp.checked;
+                save();
+                renderObjectProperties(obj, layer);
+            });
+            fillRow.appendChild(fillInp);
+
+            if (obj.fill) {
+                colorInput('Fill Color', () => obj.fillColor ?? obj.color, v => { obj.fillColor = v; });
+            }
+        }
+
+        slider('Segments', 2, 256, 1,
+            () => obj.segments,
+            v => { obj.segments = Math.max(2, Math.round(v)); }
+        );
 
         // Color reactive toggle + sensitivity (shown only when reactive)
         const sensitivityRow = document.createElement('div');
@@ -1991,25 +2175,20 @@ function renderObjectProperties(obj, layer) {
         crRow.appendChild(crInp);
         (currentSection || panel).appendChild(sensitivityRow);
 
+        slider('Line Width', 1, 30, 0.1,
+            () => obj.lineWidth ?? 1,
+            v => { obj.lineWidth = v; }
+        );
+
         slider('Opacity', 0, 1, 0.01,
             () => obj.opacity ?? 0.5,
             v => { obj.opacity = v; }
         );
 
+        obj.sampleCount = 100;
+
         section('Amplitude');
         bindingPanel('Amplitude', obj.amplitude);
-
-        slider('Samples', 1, 128, 1,
-            () => obj.sampleCount ?? 128,
-            v  => { obj.sampleCount = Math.round(v); }
-        );
-
-        section('Shape');
-        bindingPanel('Width', obj.width, { min: 1, max: 50 });
-        bindingPanel('Radius (circular)', obj.radius);
-        if (obj.waveType === 'bars' || obj.waveType === 'bars-both') {
-            bindingPanel('Bar Spacing', obj.barSpacing, { min: 0.001, max: 1, step: 0.001 });
-        }
     }
 
     // ── Image-specific ──────────────────────────
@@ -2028,6 +2207,30 @@ function renderObjectProperties(obj, layer) {
             slider('Playback Rate', 0.1, 4, 0.05,
                 () => obj.playbackRate ?? 1,
                 v => { obj.playbackRate = v; });
+
+            const audioRow = row('Audio');
+            const audioBtn = document.createElement('div');
+            audioBtn.className = 'Btn';
+            const isSynced = syncedVideoObjId === obj.id;
+            audioBtn.textContent = isSynced ? 'Unlink Track' : 'Load as Track';
+            audioBtn.addEventListener('click', async () => {
+                if (syncedVideoObjId === obj.id) {
+                    syncedVideoObjId = null;
+                    saveAllToDB();
+                    renderObjectProperties(obj, layer);
+                    return;
+                }
+                if (!obj.videoName) return;
+                try {
+                    await loadVideoAudioAsTrack(obj);
+                    syncedVideoObjId = obj.id;
+                    saveAllToDB();
+                    renderObjectProperties(obj, layer);
+                } catch (e) {
+                    notifyVideoAudio(e?.message || 'Failed to load audio from video');
+                }
+            });
+            audioRow.appendChild(audioBtn);
         } else {
             const imgRow = row('Image');
             imgRow.appendChild(createPreviewArea('bg', obj.imageName, name => {
@@ -2128,17 +2331,10 @@ document.getElementById('pause-btn').addEventListener('click', () => {
     isPlaying ? pauseAudio() : resumeAudio();
 });
 
-document.getElementById('hide-player').addEventListener('click', () => {
-    const ui = document.getElementById('player');
-    ui.style.display = ui.style.display === 'none' ? 'block' : 'none';
-});
-document.getElementById('hide-controlls').addEventListener('click', () => {
-    const ui = document.getElementById('controlls');
-    ui.style.display = ui.style.display === 'none' ? 'block' : 'none';
-});
-
 document.getElementById('audio-volume').addEventListener('input', (e) => {
     Volume = parseFloat(e.target.value);
+    listener.setMasterVolume(Volume);
+    saveAllToDB();
 });
 
 document.getElementById('add-layer').addEventListener('click', async () => {
@@ -2292,6 +2488,7 @@ window.addEventListener('load', async () => {
         builder.addLayer(new Layer('Background', true));
     }
     renderLayerList();
+    renderAnimationList();
     switchPPContext('global');
 
     if (builder.layers.length > 0) selectLayer(builder.layers[0]);
@@ -2335,10 +2532,18 @@ function updatePPPills() {
 // ─────────────────────────────────────────────
 //  Animation loop
 // ─────────────────────────────────────────────
+const _freqPreviewCanvas = document.getElementById('freq-preview');
+const _freqPreviewCtx    = _freqPreviewCanvas?.getContext('2d') ?? null;
+if (typeof ResizeObserver !== 'undefined' && _freqPreviewCanvas) {
+    new ResizeObserver(_drawWaveformPreview).observe(_freqPreviewCanvas);
+}
+
 function animate(time) {
     builder.updateAudioData(analyser, Volume);
     updateProgressBar();
-    sound.setVolume(Volume);
+    _drawWaveformPreview();
+    _syncVideoToAudio();
+    listener.setMasterVolume(Volume);
     builder.update(time);
 }
 

@@ -5,6 +5,7 @@ import {
     EquirectangularReflectionMapping,
     WebGLRenderTarget, OrthographicCamera, Mesh, PlaneGeometry,
     CustomBlending, OneFactor, OneMinusSrcAlphaFactor,
+    BufferGeometry, BufferAttribute, DoubleSide,
 } from './modules/three.js/build/three.module.js';
 
 import { LineSegments2 }        from './modules/three.js/examples/jsm/lines/LineSegments2.js';
@@ -290,6 +291,10 @@ export class SceneBuilder {
         return N; // circular, bars, bars-both
     }
 
+    _waveSupportsFill(waveType) {
+        return waveType === 'linear' || waveType === 'linear-up' || waveType === 'line';
+    }
+
     _createWaveThreeObject(waveObj) {
         const N        = waveObj.segments;
         const segCount = this._waveSegCount(waveObj.waveType, N);
@@ -313,6 +318,24 @@ export class SceneBuilder {
         three._waveType  = waveObj.waveType;
         three._segCount  = segCount;
         three._arr       = arr; // direct reference to the GPU buffer array
+
+        // Fill mesh — built lazily when fill is enabled
+        const fillVerts = new Float32Array(segCount * 6 * 3); // 2 triangles per segment, 3 verts each, 3 floats each
+        const fillGeo = new BufferGeometry();
+        fillGeo.setAttribute('position', new BufferAttribute(fillVerts, 3).setUsage(DynamicDrawUsage));
+        const fillMat = new MeshBasicMaterial({
+            color:       waveObj.fillColor ?? waveObj.color,
+            opacity:     waveObj.opacity,
+            transparent: true,
+            side:        DoubleSide,
+            depthWrite:  false,
+        });
+        const fillMesh = new Mesh(fillGeo, fillMat);
+        fillMesh.frustumCulled = false;
+        fillMesh.visible = !!waveObj.fill;
+        three.add(fillMesh);
+        three._fillMesh   = fillMesh;
+        three._fillVerts  = fillVerts;
         return three;
     }
 
@@ -331,12 +354,19 @@ export class SceneBuilder {
             for (const layer of this.layers) {
                 if (layer.getObject(waveObj.id)) {
                     const scene = this._layerScenes.get(layer.id);
+                    const wasAttached = this._transformControls?.object === three;
+                    if (wasAttached) this.detachGizmo();
                     scene?.remove(three);
+                    if (three._fillMesh) {
+                        three._fillMesh.geometry.dispose();
+                        three._fillMesh.material.dispose();
+                    }
                     three.geometry.dispose();
                     three.material.dispose();
                     three = this._createWaveThreeObject(waveObj);
                     waveObj.threeObject = three;
                     scene?.add(three);
+                    if (wasAttached) this._transformControls.attach(three);
                     break;
                 }
             }
@@ -349,10 +379,18 @@ export class SceneBuilder {
             three.material.color.setHSL(hue, 1, 0.5);
         }
         three.material.opacity = waveObj.opacity;
-        const lineWidthValue = waveObj.width?.resolve ? 
-                       waveObj.width.resolve(ad) : 
-                       (waveObj.width ?? 4);
-        three.material.linewidth = lineWidthValue;
+
+        // Fill mesh sync
+        if (three._fillMesh) {
+            const supportsFill = this._waveSupportsFill(waveObj.waveType);
+            three._fillMesh.visible = !!waveObj.fill && supportsFill;
+            three._fillMesh.material.opacity = waveObj.opacity;
+            three._fillMesh.material.color.set(waveObj.fillColor ?? waveObj.color);
+            if (waveObj.colorReactive) {
+                three._fillMesh.material.color.copy(three.material.color);
+            }
+        }
+        three.material.linewidth = waveObj.lineWidth ?? 1;
 
         three.material.resolution.set(this.renderer.domElement.width, this.renderer.domElement.height);
         
@@ -397,16 +435,18 @@ export class SceneBuilder {
                 }
                 break;
 
-            case 'linear-up':
+            case 'linear-up': {
+                const ampU = Math.max(0, amplitude);
                 for (let i = 0; i < N - 1; i++) {
                     const x0 = (i       / (N-1) - 0.5) * width;
                     const x1 = ((i + 1) / (N-1) - 0.5) * width;
-                    const h0 = (freqData[ptBin(i,     N)] / 255) * amplitude;
-                    const h1 = (freqData[ptBin(i + 1, N)] / 255) * amplitude;
+                    const h0 = Math.max(0, (freqData[ptBin(i,     N)] / 255) * ampU);
+                    const h1 = Math.max(0, (freqData[ptBin(i + 1, N)] / 255) * ampU);
                     arr[i*6]   = x0; arr[i*6+1] = h0; arr[i*6+2] = 0;
                     arr[i*6+3] = x1; arr[i*6+4] = h1; arr[i*6+5] = 0;
                 }
                 break;
+            }
 
             case 'bars':
                 for (let i = 0; i < N; i++) {
@@ -427,15 +467,38 @@ export class SceneBuilder {
                 break;
 
             case 'line': {
-                const y = (ad.avgFrequency / 255) * amplitude;
+                const y = Math.max(0, (ad.avgFrequency / 255) * amplitude);
                 arr[0] = -width*0.5; arr[1] = y; arr[2] = 0;
                 arr[3] =  width*0.5; arr[4] = y; arr[5] = 0;
                 break;
             }
+
         }
 
         // Mark the underlying interleaved buffer for GPU upload
         three.geometry.attributes.instanceStart.data.needsUpdate = true;
+
+        // Build fill triangles between line and y=0
+        if (three._fillMesh && three._fillMesh.visible) {
+            const fv = three._fillVerts;
+            const segs = segCount;
+            // Two triangles per segment: (x0,0)-(x0,y0)-(x1,y1) and (x0,0)-(x1,y1)-(x1,0)
+            // Layout: 6 verts per seg × 3 floats = 18 per seg
+            for (let i = 0; i < segs; i++) {
+                const a = i * 6;
+                const x0 = arr[a],   y0 = arr[a+1];
+                const x1 = arr[a+3], y1 = arr[a+4];
+                const o = i * 18;
+                fv[o   ] = x0; fv[o+ 1] = 0;  fv[o+ 2] = 0;
+                fv[o+ 3] = x0; fv[o+ 4] = y0; fv[o+ 5] = 0;
+                fv[o+ 6] = x1; fv[o+ 7] = y1; fv[o+ 8] = 0;
+                fv[o+ 9] = x0; fv[o+10] = 0;  fv[o+11] = 0;
+                fv[o+12] = x1; fv[o+13] = y1; fv[o+14] = 0;
+                fv[o+15] = x1; fv[o+16] = 0;  fv[o+17] = 0;
+            }
+            three._fillMesh.geometry.attributes.position.needsUpdate = true;
+            three._fillMesh.geometry.setDrawRange(0, segs * 6);
+        }
     }
 
     // ─────────────────────────────────────────

@@ -118,11 +118,6 @@
         body.appendChild(plyr);
         body.appendChild(ctrls);
 
-        const hc = document.getElementById('hide-controlls');
-        const hp = document.getElementById('hide-player');
-        if (hc) hc.style.display = 'none';
-        if (hp) hp.style.display = 'none';
-
         setTab(currentTab);
     }
 
@@ -153,11 +148,6 @@
         }
         if (ctrls) ctrls.classList.remove('drawer-hidden');
         if (plyr)  plyr.classList.remove('drawer-hidden');
-
-        const hc = document.getElementById('hide-controlls');
-        const hp = document.getElementById('hide-player');
-        if (hc) hc.style.display = '';
-        if (hp) hp.style.display = '';
     }
 
     function apply() {

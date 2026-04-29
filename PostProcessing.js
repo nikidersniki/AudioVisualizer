@@ -55,6 +55,35 @@ export const PP_SHADER_REGISTRY = {
         },
     },
 
+    mirror: {
+        name:         'Mirror',
+        vertexPath:   './shaders/vertex.glsl',
+        fragmentPath: './shaders/mirror.glsl',
+        _vertSrc: null,
+        _fragSrc: null,
+        defaultProperties: { side: 'left' },
+        propertyDefs: [
+            { key: 'side', label: 'Side', type: 'select', options: [
+                { value: 'left',   label: 'Left → Right' },
+                { value: 'right',  label: 'Right → Left' },
+                { value: 'top',    label: 'Top → Bottom' },
+                { value: 'bottom', label: 'Bottom → Top' }
+            ]}
+        ],
+        _sideIndex(side) {
+            return { left: 0, right: 1, top: 2, bottom: 3 }[side] ?? 0;
+        },
+        buildUniforms(props, w, h) {
+            return {
+                tDiffuse: { value: null },
+                uSide:    { value: this._sideIndex(props.side) },
+            };
+        },
+        updateUniforms(u, props) {
+            u.uSide.value = this._sideIndex(props.side);
+        },
+    },
+
     sharpen: {
         name:         'Sharpen',
         vertexPath:   './shaders/vertex.glsl',

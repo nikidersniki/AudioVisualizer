@@ -36,12 +36,7 @@ import { GoldenLayout } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+
         const progress  = document.getElementById('progress-bar-container');
         const nowPlay   = document.getElementById('now-playing');
         const editorSwitch = document.getElementById('editorSwitch');
-        const hideC     = document.getElementById('hide-controlls');
-        const hideP     = document.getElementById('hide-player');
-
         if (editorSwitch) editorSwitch.style.display = 'none';
-        if (hideC) hideC.style.display = 'none';
-        if (hideP) hideP.style.display = 'none';
 
         // Always show all editor sections — independent windows now
         if (objEditor) objEditor.style.display = '';
@@ -81,7 +76,7 @@ import { GoldenLayout } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+
             'object-editor':   { title: 'Object Editor',   hostId: 'current-layer-controls' },
             'post-processing': { title: 'Post Processing', hostId: 'pp-section' },
             'animation':       { title: 'Animation',       hostId: 'anim-section' },
-            'progress-bar':    { title: 'Progress Bar',    hostId: 'progress-host' },
+            'progress-bar':    { title: 'Player',          hostId: 'progress-host' },
             'settings':        { title: 'Settings',        hostId: 'controlls' },
             'project-settings':{ title: 'Project Settings', hostId: 'project-settings' }
         };
@@ -115,7 +110,7 @@ import { GoldenLayout } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+
             });
         });
 
-        const SAVE_KEY = 'gl-layout-v7';
+        const SAVE_KEY = 'gl-layout-v8';
         const defaultLayout = {
             settings: {
                 showPopoutIcon: false,
@@ -136,7 +131,7 @@ import { GoldenLayout } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+
                         type: 'column', size: '55%',
                         content: [
                             { type: 'component', componentType: 'viewport',     title: 'Viewport',     size: '75%' },
-                            { type: 'component', componentType: 'progress-bar', title: 'Progress Bar', size: '25%' }
+                            { type: 'component', componentType: 'progress-bar', title: 'Player', size: '25%' }
                         ]
                     },
                     {
@@ -190,10 +185,19 @@ import { GoldenLayout } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+
         catch (e) { console.warn('saved layout invalid, loading default', e); layout.loadLayout(defaultLayout); }
         queueMicrotask(() => { _isLoadingLayout = false; });
 
+        let _persistTimer = 0;
         const persist = () => {
+            if (_isLoadingLayout) return;
             try { localStorage.setItem(SAVE_KEY, JSON.stringify(layout.saveLayout())); } catch {}
         };
-        layout.addEventListener?.('stateChanged', persist);
+        const persistDebounced = () => {
+            clearTimeout(_persistTimer);
+            _persistTimer = setTimeout(persist, 250);
+        };
+        ['stateChanged', 'itemCreated', 'itemDestroyed', 'activeContentItemChanged', 'tabCreated', 'rowCreated', 'columnCreated', 'stackCreated']
+            .forEach(ev => layout.addEventListener?.(ev, persistDebounced));
+        window.addEventListener('beforeunload', persist);
+        window.addEventListener('pagehide', persist);
 
         const resize = () => {
             const r = glContainer.getBoundingClientRect();
