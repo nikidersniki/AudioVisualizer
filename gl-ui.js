@@ -1,4 +1,4 @@
-import { GoldenLayout } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+esm';
+import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+esm';
 
 (function () {
     const MOBILE_MQ = window.matchMedia('(max-width: 768px)');
@@ -110,7 +110,19 @@ import { GoldenLayout } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+
             });
         });
 
-        const SAVE_KEY = 'gl-layout-v8';
+        const SAVE_KEY = 'gl-layout-v11';
+
+        // GL v2 saveLayout returns a ResolvedLayoutConfig (with numeric `size`)
+        // while loadLayout always expects an unresolved LayoutConfig (string `size`).
+        // Convert before loading so JSON-persisted snapshots round-trip cleanly.
+        const _maybeUnresolve = (cfg) => {
+            if (!cfg || typeof cfg !== 'object') return cfg;
+            const isResolved = cfg.resolved === true || (cfg.root && typeof cfg.root.size === 'number');
+            if (isResolved && LayoutConfig?.fromResolved) {
+                try { return LayoutConfig.fromResolved(cfg); } catch { return cfg; }
+            }
+            return cfg;
+        };
         const defaultLayout = {
             settings: {
                 showPopoutIcon: false,
@@ -121,28 +133,28 @@ import { GoldenLayout } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+
                 type: 'row',
                 content: [
                     {
-                        type: 'column', size: '20%',
+                        type: 'column',
                         content: [
                             { type: 'component', componentType: 'outliner',     title: 'Outliner' },
                             { type: 'component', componentType: 'saved-tracks', title: 'Saved Tracks' }
                         ]
                     },
                     {
-                        type: 'column', size: '55%',
+                        type: 'column',
                         content: [
-                            { type: 'component', componentType: 'viewport',     title: 'Viewport',     size: '75%' },
-                            { type: 'component', componentType: 'progress-bar', title: 'Player', size: '25%' }
+                            { type: 'component', componentType: 'viewport',     title: 'Viewport' },
+                            { type: 'component', componentType: 'progress-bar', title: 'Player' }
                         ]
                     },
                     {
-                        type: 'column', size: '25%',
+                        type: 'column',
                         content: [
-                            { type: 'stack', size: '70%', content: [
+                            { type: 'stack', content: [
                                 { type: 'component', componentType: 'object-editor',   title: 'Object Editor' },
                                 { type: 'component', componentType: 'post-processing', title: 'Post Processing' },
                                 { type: 'component', componentType: 'animation',       title: 'Animation' }
                             ]},
-                            { type: 'stack', size: '30%', content: [
+                            { type: 'stack', content: [
                                 { type: 'component', componentType: 'settings',         title: 'Settings' },
                                 { type: 'component', componentType: 'project-settings', title: 'Project Settings' }
                             ]}
@@ -181,14 +193,36 @@ import { GoldenLayout } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+
         if (saved) {
             try { toLoad = JSON.parse(saved); } catch { toLoad = defaultLayout; }
         }
-        try { layout.loadLayout(toLoad); }
-        catch (e) { console.warn('saved layout invalid, loading default', e); layout.loadLayout(defaultLayout); }
-        queueMicrotask(() => { _isLoadingLayout = false; });
+        let _bootRecovered = false;
+        try { layout.loadLayout(_maybeUnresolve(toLoad)); }
+        catch (e) {
+            console.warn('saved layout invalid, loading default', e);
+            try { layout.loadLayout(defaultLayout); } catch (e2) { console.error(e2); }
+            try { localStorage.removeItem(SAVE_KEY); } catch {}
+            _bootRecovered = true;
+        }
+        queueMicrotask(() => {
+            _isLoadingLayout = false;
+            // Force a persist after recovery so the project DB and localStorage
+            // get overwritten with a valid snapshot ASAP.
+            if (_bootRecovered) persist();
+        });
 
         let _persistTimer = 0;
         const persist = () => {
             if (_isLoadingLayout) return;
-            try { localStorage.setItem(SAVE_KEY, JSON.stringify(layout.saveLayout())); } catch {}
+            let resolved = null;
+            try { resolved = layout.saveLayout(); } catch {}
+            if (!resolved) return;
+            // Convert resolved config (numeric sizes) back to input config (string sizes)
+            // so loadLayout can re-parse it without crashing on numeric `size`.
+            let inputCfg = resolved;
+            try {
+                if (LayoutConfig?.fromResolved) inputCfg = LayoutConfig.fromResolved(resolved);
+            } catch {}
+            window.__GL_LAYOUT_JSON__ = inputCfg;
+            try { localStorage.setItem(SAVE_KEY, JSON.stringify(inputCfg)); } catch {}
+            window.dispatchEvent(new CustomEvent('gl-layout-changed'));
         };
         const persistDebounced = () => {
             clearTimeout(_persistTimer);
@@ -276,8 +310,50 @@ import { GoldenLayout } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+
             location.reload();
         };
 
+        // Apply a project-loaded layout (called from main.js on project load)
+        window.applyGLLayout = (json) => {
+            if (!json) return;
+            _isLoadingLayout = true;
+            try { layout.loadLayout(_maybeUnresolve(json)); }
+            catch (e) {
+                console.warn('applyGLLayout failed (incompatible layout, keeping current)', e);
+            }
+            queueMicrotask(() => {
+                _isLoadingLayout = false;
+                persist(); // overwrite stored bad data with current (known-good) snapshot
+            });
+        };
+
+        setupLayoutMenu();
+
         // Reload when crossing the mobile breakpoint so mobile-ui can take over
         MOBILE_MQ.addEventListener?.('change', () => location.reload());
+    }
+
+    function setupLayoutMenu() {
+        const btn  = document.getElementById('layout-menu-btn');
+        const list = document.getElementById('layout-menu-list');
+        if (!btn || !list) return;
+
+        const buildMenu = () => {
+            list.innerHTML = '';
+            const reset = document.createElement('div');
+            reset.className = 'windows-menu-item';
+            reset.textContent = '   Reset Layout';
+            reset.addEventListener('click', (ev) => {
+                ev.stopPropagation();
+                list.classList.remove('open');
+                window.resetLayout?.();
+            });
+            list.appendChild(reset);
+        };
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            buildMenu();
+            list.classList.toggle('open');
+        });
+        document.addEventListener('click', () => list.classList.remove('open'));
     }
 
     function notifyPopup(message) {
@@ -335,18 +411,6 @@ import { GoldenLayout } from 'https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/+
                 list.appendChild(row);
             });
 
-            const sep = document.createElement('div');
-            sep.className = 'windows-menu-sep';
-            list.appendChild(sep);
-
-            const reset = document.createElement('div');
-            reset.className = 'windows-menu-item';
-            reset.textContent = '   Reset Layout';
-            reset.addEventListener('click', (ev) => {
-                ev.stopPropagation();
-                window.resetLayout?.();
-            });
-            list.appendChild(reset);
         };
 
         btn.addEventListener('click', (e) => {

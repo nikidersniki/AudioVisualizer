@@ -2,6 +2,7 @@ import {
     ShaderMaterial, WebGLRenderTarget, Mesh, PlaneGeometry,
     Scene, OrthographicCamera, Vector2, Vector4,
     TextureLoader, RepeatWrapping, Color,
+    CanvasTexture, ClampToEdgeWrapping, NearestFilter,
 } from './modules/three.js/build/three.module.js';
 
 import { UnrealBloomPass } from './modules/three.js/examples/jsm/postprocessing/UnrealBloomPass.js';
@@ -18,6 +19,34 @@ function _getOrLoadNoiseTex() {
         _noiseTex.wrapS = _noiseTex.wrapT = RepeatWrapping;
     }
     return _noiseTex;
+}
+
+// ── ASCII glyph atlas (generated once via canvas) ─────────────
+const ASCII_GLYPHS = ' .:-=+*#%@';
+let _asciiTex = null;
+function _getOrBuildAsciiAtlas() {
+    if (_asciiTex) return _asciiTex;
+    const cell = 32;
+    const n    = ASCII_GLYPHS.length;
+    const cv   = document.createElement('canvas');
+    cv.width   = cell * n;
+    cv.height  = cell;
+    const ctx  = cv.getContext('2d');
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle    = '#fff';
+    ctx.font         = `${Math.round(cell * 0.95)}px monospace`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    for (let i = 0; i < n; i++) {
+        ctx.fillText(ASCII_GLYPHS[i], i * cell + cell / 2, cell / 2);
+    }
+    _asciiTex = new CanvasTexture(cv);
+    _asciiTex.wrapS = _asciiTex.wrapT = ClampToEdgeWrapping;
+    _asciiTex.minFilter = NearestFilter;
+    _asciiTex.magFilter = NearestFilter;
+    _asciiTex.flipY = true;
+    return _asciiTex;
 }
 
 // ─────────────────────────────────────────────
@@ -52,6 +81,38 @@ export const PP_SHADER_REGISTRY = {
             u.iTime.value    = time / 1000;
             u.iResolution.value.set(w, h);
             u.iMouse.value.z = props.enableBlur ? 1 : 0;
+        },
+    },
+
+    ascii: {
+        name:         'ASCII',
+        vertexPath:   './shaders/vertex.glsl',
+        fragmentPath: './shaders/ascii.glsl',
+        _vertSrc: null,
+        _fragSrc: null,
+        defaultProperties: {
+            cellSize: 8,
+            colors:   16,
+        },
+        propertyDefs: [
+            { key: 'cellSize', label: 'Cell Size', type: 'slider', min: 4, max: 32,  step: 1 },
+            { key: 'colors',   label: 'Colors',    type: 'slider', min: 2, max: 256, step: 1 },
+        ],
+        buildUniforms(props, w, h) {
+            return {
+                tDiffuse:    { value: null },
+                uAscii:      { value: _getOrBuildAsciiAtlas() },
+                iResolution: { value: new Vector2(w, h) },
+                uCellSize:   { value: props.cellSize },
+                uGlyphCount: { value: ASCII_GLYPHS.length },
+                uColors:     { value: props.colors },
+            };
+        },
+        updateUniforms(u, props, _time, w, h) {
+            u.iResolution.value.set(w, h);
+            u.uCellSize.value   = props.cellSize;
+            u.uGlyphCount.value = ASCII_GLYPHS.length;
+            u.uColors.value     = props.colors;
         },
     },
 

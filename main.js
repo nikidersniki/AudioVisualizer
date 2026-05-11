@@ -135,6 +135,7 @@ let allTracks    = [];   // { id, file, name, ... } in display order
 let currentTrackId = null;
 const customCatalogues = { hdri: [], bg: [], video: [] }; // { name, dataURL } — persisted in global layer
 let animatedProperties = []; // [{ objectId, key, label }] — persisted in global layer
+const _animBtnRefreshers = []; // refresh fns for currently rendered property-panel animate buttons
 
 // ─────────────────────────────────────────────
 //  IndexedDB
@@ -204,6 +205,7 @@ function serializeAll() {
           bgColor: builder._bgColor, hdri: builder.selectedHDRI,
           volume: Volume,
           syncedVideoObjId,
+          glLayout: window.__GL_LAYOUT_JSON__ ?? null,
           customCatalogues, animatedProperties },
         ...sceneLayers,
     ];
@@ -254,6 +256,10 @@ async function deserializeAll(data) {
         if (v) v.value = Volume;
     }
     syncedVideoObjId = globalEntry?.syncedVideoObjId ?? null;
+
+    if (globalEntry?.glLayout && typeof window.applyGLLayout === 'function') {
+        window.applyGLLayout(globalEntry.glLayout);
+    }
 
     // Restore global PP
     const globalCtx = ppContexts.get('global');
@@ -336,6 +342,7 @@ function toggleAnimatedProperty(objectId, key, label, range = { min: -10, max: 1
     }
     saveAllToDB();
     renderAnimationList();
+    for (const fn of _animBtnRefreshers) fn();
 }
 
 function _animPropRow(labelText, control) {
@@ -1614,7 +1621,11 @@ function selectLayer(layer) {
     }
 
     renderObjectList(layer);
-    document.getElementById('object-properties').innerHTML = '';
+    if (layer.objects.length > 0) {
+        selectObject(layer.objects[0], layer);
+    } else {
+        document.getElementById('object-properties').innerHTML = '';
+    }
 }
 
 // ─────────────────────────────────────────────
@@ -1691,6 +1702,7 @@ const CURVES        = ['linear','exponential','inverse'];
 function renderObjectProperties(obj, layer) {
     const panel = document.getElementById('object-properties');
     panel.innerHTML = '';
+    _animBtnRefreshers.length = 0;
 
     const save = () => saveAllToDB();
 
@@ -1878,22 +1890,22 @@ function renderObjectProperties(obj, layer) {
             animBtn.className = 'prop-animate-btn';
             animBtn.textContent = '●';
             animBtn.title = 'Animate (audio sync)';
-            const refresh = () => animBtn.classList.toggle('active',
-                isPropertyAnimated(selectedObject.id, ownerKey));
+            const panelObjId = selectedObject.id;
+            const refresh = () => {
+                if (!selectedObject || selectedObject.id !== panelObjId) return;
+                const on = isPropertyAnimated(panelObjId, ownerKey);
+                animBtn.classList.toggle('active', on);
+                cSlider.disabled = on;
+                cNum.disabled    = on;
+                valueRow.classList.toggle('animated', on);
+            };
             refresh();
             animBtn.addEventListener('click', () => {
-                const nowOn = !isPropertyAnimated(selectedObject.id, ownerKey);
+                const nowOn = !isPropertyAnimated(panelObjId, ownerKey);
                 binding.mode = nowOn ? 'audio' : 'constant';
-                toggleAnimatedProperty(selectedObject.id, ownerKey, label, range);
-                refresh();
-                cSlider.disabled = nowOn;
-                cNum.disabled    = nowOn;
-                valueRow.classList.toggle('animated', nowOn);
+                toggleAnimatedProperty(panelObjId, ownerKey, label, range);
             });
-            const animated = isPropertyAnimated(selectedObject.id, ownerKey);
-            cSlider.disabled = animated;
-            cNum.disabled    = animated;
-            valueRow.classList.toggle('animated', animated);
+            _animBtnRefreshers.push(refresh);
             wrap.appendChild(animBtn);
         }
 
@@ -1959,7 +1971,7 @@ function renderObjectProperties(obj, layer) {
         const isNormal   = () => obj.materialType === 'normal';
 
         // Centralised visibility sync — all refs may be null when called during init
-        const syncMatVisibility = (type = obj.materialType) => {
+        let syncMatVisibility = (type = obj.materialType) => {
             const std = type === 'standard';
             const nor = type === 'normal';
             const hideColor = std && obj.useMapTexture;
@@ -2075,11 +2087,29 @@ function renderObjectProperties(obj, layer) {
         );
         opacityRowRef.style.display = isNormal() ? 'none' : '';
 
+        const wireLineWidthRowRef = slider('Wire Line Width', 1, 20, 0.1,
+            () => obj.wireframeLineWidth ?? 2,
+            v => { obj.wireframeLineWidth = v; }
+        );
+        wireLineWidthRowRef.style.display = obj.materialType === 'wireframe' ? '' : 'none';
+
+        // Hook into the existing visibility sync so it shows/hides with the material type
+        const _origSyncMatVisibility = syncMatVisibility;
+        syncMatVisibility = (type = obj.materialType) => {
+            _origSyncMatVisibility(type);
+            wireLineWidthRowRef.style.display = type === 'wireframe' ? '' : 'none';
+        };
+
         section('Audio Scale');
         bindingPanel('Audio Scale', obj.audioScale);
 
         section('Spin');
         bindingPanel('Spin Speed', obj.spinSpeed);
+        selectInput('Spin Axis',
+            ['+x', '-x', '+y', '-y', '+z', '-z'],
+            () => obj.spinAxis ?? '+y',
+            v => { obj.spinAxis = v; }
+        );
 
         section('Noise');
         bindingPanel('Noise Scale', obj.noiseScale);
@@ -2250,20 +2280,22 @@ function renderObjectProperties(obj, layer) {
 // ─────────────────────────────────────────────
 async function duplicateObject(obj, layer) {
     const data = { ...obj.toJSON(), id: crypto.randomUUID(), name: obj.name + ' copy' };
+    let newObj = null;
     if (obj.type === 'model') {
-        const newObj = ModelObject.fromJSON(data);
+        newObj = ModelObject.fromJSON(data);
         await builder.addModelToLayer(layer.id, newObj);
     } else if (obj.type === 'pointLight') {
-        const newObj = PointLightObject.fromJSON(data);
+        newObj = PointLightObject.fromJSON(data);
         builder.addLightToLayer(layer.id, newObj);
     } else if (obj.type === 'wave') {
-        const newObj = WaveObject.fromJSON(data);
+        newObj = WaveObject.fromJSON(data);
         builder.addWaveToLayer(layer.id, newObj);
     } else if (obj.type === 'image') {
-        const newObj = FillObject.fromJSON(data);
+        newObj = FillObject.fromJSON(data);
         builder.addImageToLayer(layer.id, newObj);
     }
     renderObjectList(layer);
+    if (newObj) selectObject(newObj, layer);
     saveAllToDB();
 }
 
@@ -2279,6 +2311,7 @@ async function onAddModel(layer, model, modelDiplayName, Material) {
     modelObj.materialType        = Material;
     await builder.addModelToLayer(layer.id, modelObj);
     renderObjectList(layer);
+    selectObject(modelObj, layer);
     saveAllToDB();
 }
 
@@ -2291,6 +2324,7 @@ function onAddLight(layer) {
 
     builder.addLightToLayer(layer.id, lightObj);
     renderObjectList(layer);
+    selectObject(lightObj, layer);
     saveAllToDB();
 }
 
@@ -2306,6 +2340,7 @@ function onAddWave(layer, data) {
     waveObj.amplitude.max   = 1;
     builder.addWaveToLayer(layer.id, waveObj);
     renderObjectList(layer);
+    selectObject(waveObj, layer);
     saveAllToDB();
 }
 
@@ -2321,6 +2356,7 @@ function onAddImage(layer, data) {
     }
     builder.addImageToLayer(layer.id, fillObj);
     renderObjectList(layer);
+    selectObject(fillObj, layer);
     saveAllToDB();
 }
 
@@ -2335,6 +2371,12 @@ document.getElementById('audio-volume').addEventListener('input', (e) => {
     Volume = parseFloat(e.target.value);
     listener.setMasterVolume(Volume);
     saveAllToDB();
+});
+
+let _glLayoutSaveTimer = 0;
+window.addEventListener('gl-layout-changed', () => {
+    clearTimeout(_glLayoutSaveTimer);
+    _glLayoutSaveTimer = setTimeout(() => { saveAllToDB(); }, 400);
 });
 
 document.getElementById('add-layer').addEventListener('click', async () => {

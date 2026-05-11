@@ -687,7 +687,7 @@ header .h2 {
 
 .obj-btn-group {
     display: flex;
-    gap: 4px;
+    gap: 2px;
     flex-shrink: 0;
 }
 
@@ -1560,7 +1560,8 @@ main { display: none; }
 
 /* Windows dropdown */
 .Btn-dropdown { position: relative; }
-#windows-menu-list {
+#windows-menu-list,
+#layout-menu-list {
     display: none;
     position: absolute;
     top: 100%; left: 0;
@@ -1572,7 +1573,8 @@ main { display: none; }
     font-family: var(--font-mono);
     font-size: 12px;
 }
-#windows-menu-list.open { display: block; }
+#windows-menu-list.open,
+#layout-menu-list.open { display: block; }
 .windows-menu-item {
     padding: 6px 12px;
     color: var(--text);

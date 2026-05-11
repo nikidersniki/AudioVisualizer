@@ -6,6 +6,7 @@ import {
     WebGLRenderTarget, OrthographicCamera, Mesh, PlaneGeometry,
     CustomBlending, OneFactor, OneMinusSrcAlphaFactor,
     BufferGeometry, BufferAttribute, DoubleSide,
+    EdgesGeometry,
 } from './modules/three.js/build/three.module.js';
 
 import { LineSegments2 }        from './modules/three.js/examples/jsm/lines/LineSegments2.js';
@@ -675,7 +676,8 @@ export class SceneBuilder {
 
     _cloneMaterialForType(type) {
         if (type === 'wireframe') {
-            return new MeshBasicMaterial({ wireframe: true, color: 0xffffff });
+            // The mesh itself is hidden; a LineSegments2 wireframe overlay is added per child mesh.
+            return new MeshBasicMaterial({ visible: false });
         }
         if (type === 'standard') {
             const m = new MeshStandardMaterial({ color: 0x888888, roughness: 1, metalness: 0 });
@@ -683,6 +685,84 @@ export class SceneBuilder {
             return m;
         }
         return PRESETS.materials.normal; // normal is shared — no per-model props needed
+    }
+
+    _ensureWireframeOverlay(mesh) {
+        if (mesh._wfOverlay) return mesh._wfOverlay;
+        const geo = mesh.geometry;
+        const idxArr = geo.index ? geo.index.array : null;
+        const triCount = idxArr ? (idxArr.length / 3) : (geo.attributes.position.count / 3);
+
+        const edges = new Map();
+        const addEdge = (a, b) => {
+            const k = a < b ? (a + '_' + b) : (b + '_' + a);
+            if (!edges.has(k)) edges.set(k, a < b ? [a, b] : [b, a]);
+        };
+        for (let t = 0; t < triCount; t++) {
+            const i = t * 3;
+            const a = idxArr ? idxArr[i]     : i;
+            const b = idxArr ? idxArr[i + 1] : i + 1;
+            const c = idxArr ? idxArr[i + 2] : i + 2;
+            addEdge(a, b); addEdge(b, c); addEdge(c, a);
+        }
+
+        const segCount = edges.size;
+        const pairs    = new Uint32Array(segCount * 2);
+        const positions = new Float32Array(segCount * 6);
+        {
+            let p = 0;
+            for (const [, [a, b]] of edges) { pairs[p++] = a; pairs[p++] = b; }
+        }
+
+        const lg = new LineSegmentsGeometry();
+        lg.setPositions(positions);
+        const lm = new LineMaterial({
+            color:       0xffffff,
+            linewidth:   2,
+            transparent: true,
+            opacity:     1,
+        });
+        lm.resolution.set(this.renderer.domElement.width, this.renderer.domElement.height);
+        const overlay = new LineSegments2(lg, lm);
+        overlay.frustumCulled = false;
+        overlay._isWireframeOverlay = true;
+        mesh.add(overlay);
+        mesh._wfOverlay        = overlay;
+        mesh._wfEdgePairs      = pairs;
+        mesh._wfLinePositions  = positions;
+        this._updateWireframeOverlayPositions(mesh); // initial fill
+        return overlay;
+    }
+
+    _updateWireframeOverlayPositions(mesh) {
+        const overlay = mesh._wfOverlay;
+        if (!overlay) return;
+        const pairs     = mesh._wfEdgePairs;
+        const positions = mesh._wfLinePositions;
+        const posAttr   = mesh.geometry.attributes.position;
+        const segCount  = pairs.length / 2;
+        for (let s = 0; s < segCount; s++) {
+            const a = pairs[s * 2];
+            const b = pairs[s * 2 + 1];
+            positions[s * 6    ] = posAttr.getX(a);
+            positions[s * 6 + 1] = posAttr.getY(a);
+            positions[s * 6 + 2] = posAttr.getZ(a);
+            positions[s * 6 + 3] = posAttr.getX(b);
+            positions[s * 6 + 4] = posAttr.getY(b);
+            positions[s * 6 + 5] = posAttr.getZ(b);
+        }
+        overlay.geometry.attributes.instanceStart.data.needsUpdate = true;
+    }
+
+    _removeWireframeOverlay(mesh) {
+        if (!mesh._wfOverlay) return;
+        const ov = mesh._wfOverlay;
+        mesh.remove(ov);
+        ov.geometry.dispose();
+        ov.material.dispose();
+        mesh._wfOverlay = null;
+        mesh._wfEdgePairs = null;
+        mesh._wfLinePositions = null;
     }
 
     // ─────────────────────────────────────────
@@ -763,7 +843,18 @@ export class SceneBuilder {
         // ── Spin ──────────────────────────────────────
         const speed = modelObj.spinSpeed.resolve(ad);
         if (speed !== 0) {
-            three.rotation.y = modelObj.rotY.resolve(ad) + time / 1000 * speed;
+            const dir = modelObj.spinAxis ?? '+y';
+            const sign = dir.charAt(0) === '-' ? -1 : 1;
+            const axis = dir.slice(-1); // 'x' | 'y' | 'z'
+            const delta = (time / 1000) * speed * sign;
+            const rx = modelObj.rotX.resolve(ad);
+            const ry = modelObj.rotY.resolve(ad);
+            const rz = modelObj.rotZ.resolve(ad);
+            three.rotation.set(
+                axis === 'x' ? rx + delta : rx,
+                axis === 'y' ? ry + delta : ry,
+                axis === 'z' ? rz + delta : rz
+            );
         }
 
         // ── Noise displacement ────────────────────────
@@ -845,18 +936,31 @@ export class SceneBuilder {
             mat.flatShading = !(modelObj.smoothShading ?? true);
             if (mat.transparent !== wasTransparent || mat.flatShading !== wasFlatShading) mat.needsUpdate = true;
         } else if (modelObj.materialType === 'wireframe') {
-            const mat = three._ownMaterial;
-            mat.color.set(modelObj.color);
-            if (modelObj.colorReactive) {
-                const hue = (ad.avgFrequency / 255) * (modelObj.colorSensitivity ?? 0.5);
-                mat.color.setHSL(hue, 1, 0.5);
-            }
-            const opacity = modelObj.opacity ?? 1;
-            const wasTransparent = mat.transparent;
-            mat.opacity     = opacity;
-            mat.transparent = opacity < 1;
-            mat.depthWrite  = opacity >= 1;
-            if (mat.transparent !== wasTransparent) mat.needsUpdate = true;
+            const opacity   = modelObj.opacity ?? 1;
+            const lineWidth = modelObj.wireframeLineWidth ?? 2;
+            three.traverse(child => {
+                if (!child.isMesh || child._isWireframeOverlay) return;
+                const overlay = this._ensureWireframeOverlay(child);
+                const lm = overlay.material;
+                lm.color.set(modelObj.color);
+                if (modelObj.colorReactive) {
+                    const hue = (ad.avgFrequency / 255) * (modelObj.colorSensitivity ?? 0.5);
+                    lm.color.setHSL(hue, 1, 0.5);
+                }
+                lm.opacity     = opacity;
+                lm.transparent = opacity < 1;
+                lm.linewidth   = lineWidth;
+                lm.resolution.set(this.renderer.domElement.width, this.renderer.domElement.height);
+                // Refresh line positions from the (noise-displaced) source positions.
+                this._updateWireframeOverlayPositions(child);
+            });
+        }
+
+        // Strip wireframe overlays when not in wireframe mode
+        if (modelObj.materialType !== 'wireframe') {
+            three.traverse(child => {
+                if (child.isMesh && child._wfOverlay) this._removeWireframeOverlay(child);
+            });
         }
     }
 

@@ -115,6 +115,7 @@ export class ModelObject extends SceneObject {
         // Material
         this.materialType = 'normal';   // 'normal' | 'wireframe' | 'standard'
         this.color        = '#888888';
+        this.wireframeLineWidth = 2;
         this.roughness    = new PropertyBinding(1);
         this.metalness    = new PropertyBinding(0);
         this.useMapTexture          = true;
@@ -131,6 +132,7 @@ export class ModelObject extends SceneObject {
 
         // Rotation speed (can be audio-driven)
         this.spinSpeed    = new PropertyBinding(0);
+        this.spinAxis     = '+y'; // '+x' | '-x' | '+y' | '-y' | '+z' | '-z'
 
         this.opacity          = 1;
         this.smoothShading    = true;
