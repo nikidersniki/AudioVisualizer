@@ -131,7 +131,15 @@ export class SceneBuilder {
             highFreq:     0,
             peak:         0,
             volume:       0,
+            sub: 0, bass: 0, lowMid: 0, mid: 0, highMid: 0, presence: 0, brilliance: 0,
+            rms: 0, centroid: 0, flatness: 0, flux: 0, zcr: 0,
+            beat: 0, bpm: 0,
+            volumeFast: 0, volumeSlow: 0, avgFast: 0, avgSlow: 0,
         };
+        this._prevFreq      = null;
+        this._fluxHistory   = [];
+        this._beatTimes     = [];
+        this._lastBeatTime  = 0;
 
         // ── Final composite target + PP pipeline hook ──
         this._finalTarget    = new WebGLRenderTarget(this.width, this.height);
@@ -150,11 +158,19 @@ export class SceneBuilder {
 
         window.addEventListener('keydown', e => {
             if (!this._transformControls.object) return;
-            if (e.key === 't') this._transformControls.setMode('translate');
-            if (e.key === 'r') this._transformControls.setMode('rotate');
-            if (e.key === 's') this._transformControls.setMode('scale');
+            if (e.key === 't') this.setGizmoMode('translate');
+            if (e.key === 'r') this.setGizmoMode('rotate');
+            if (e.key === 's') this.setGizmoMode('scale');
         });
     }
+
+    setGizmoMode(mode) {
+        if (!['translate', 'rotate', 'scale'].includes(mode)) return;
+        this._transformControls.setMode(mode);
+        window.dispatchEvent(new CustomEvent('gizmo-mode-changed', { detail: { mode } }));
+    }
+
+    getGizmoMode() { return this._transformControls.mode; }
 
     // ─────────────────────────────────────────
     //  Layer management
@@ -519,10 +535,28 @@ export class SceneBuilder {
         this._layerScenes.get(layerId)?.add(fillObj.threeObject);
     }
 
-    _updateImage(fillObj) {
+    _updateImage(fillObj, time) {
         const mesh = fillObj.threeObject;
         if (!mesh) return;
-        fillObj.applyBindings(this.audioData);
+        const ad = this.audioData;
+        fillObj.applyBindings(ad);
+
+        // ── Spin ──────────────────────────────────────
+        const speed = fillObj.spinSpeed?.resolve?.(ad) ?? 0;
+        if (speed !== 0 && typeof time === 'number') {
+            const dir  = fillObj.spinAxis ?? '+z';
+            const sign = dir.charAt(0) === '-' ? -1 : 1;
+            const axis = dir.slice(-1);
+            const delta = (time / 1000) * speed * sign;
+            const rx = fillObj.rotX.resolve(ad);
+            const ry = fillObj.rotY.resolve(ad);
+            const rz = fillObj.rotZ.resolve(ad);
+            mesh.rotation.set(
+                axis === 'x' ? rx + delta : rx,
+                axis === 'y' ? ry + delta : ry,
+                axis === 'z' ? rz + delta : rz
+            );
+        }
 
         const mat     = mesh.material;
         const opacity = fillObj.opacity ?? 1;
@@ -776,7 +810,7 @@ export class SceneBuilder {
                 if (obj.type === 'model')      this._updateModel(obj, time);
                 if (obj.type === 'pointLight') obj.applyBindings(this.audioData);
                 if (obj.type === 'wave')       this._updateWave(obj);
-                if (obj.type === 'image') this._updateImage(obj);
+                if (obj.type === 'image') this._updateImage(obj, time);
             }
         }
 
@@ -802,7 +836,7 @@ export class SceneBuilder {
             const hasLayerPP = layerPP?.layers.some(l => l.visible);
             let compositeSource = target;
             if (hasLayerPP) {
-                layerPP.apply(target, time, this._layerPPTarget);
+                layerPP.apply(target, time, this._layerPPTarget, this.audioData);
                 compositeSource = this._layerPPTarget;
             }
 
@@ -816,7 +850,7 @@ export class SceneBuilder {
 
         // 2. PP pipeline → screen  (or direct blit if no pipeline)
         if (this._postPipeline) {
-            this._postPipeline.apply(this._finalTarget, time);
+            this._postPipeline.apply(this._finalTarget, time, null, this.audioData);
         } else {
             this.renderer.setRenderTarget(null);
             this._compositeQuad.material.map     = this._finalTarget.texture;
@@ -971,22 +1005,132 @@ export class SceneBuilder {
     /** Call once per frame with the Three.js AudioAnalyser */
     updateAudioData(analyser, volume) {
         const freqData = analyser.getFrequencyData(); // Uint8Array
+        const N = freqData.length;
+        const ctx = analyser.analyser.context;
+        const sampleRate = ctx.sampleRate;
+        const fftSize    = analyser.analyser.fftSize;
+        const binHz      = sampleRate / fftSize;
 
-        const third = Math.floor(freqData.length / 3);
+        // ── time-domain (RMS, zero-crossing) ──
+        const timeData = new Uint8Array(fftSize);
+        analyser.analyser.getByteTimeDomainData(timeData);
+        let sumSq = 0, zc = 0;
+        for (let i = 0; i < timeData.length; i++) {
+            const v = (timeData[i] - 128) / 128;
+            sumSq += v * v;
+            if (i > 0 && ((timeData[i-1] - 128) ^ (timeData[i] - 128)) < 0) zc++;
+        }
+        const rms = Math.sqrt(sumSq / timeData.length) * 255;
+        const zcr = (zc / timeData.length) * 255;
+
+        // ── classic 3-band split (kept for compat) ──
+        const third = Math.floor(N / 3);
         const avg = (arr, start, end) => {
+            if (end <= start) return 0;
             let sum = 0;
             for (let i = start; i < end; i++) sum += arr[i];
             return sum / (end - start);
         };
 
+        // ── 7-band split by frequency ranges (Hz) ──
+        const bandRanges = [
+            [20, 60], [60, 250], [250, 500], [500, 2000],
+            [2000, 4000], [4000, 6000], [6000, 20000],
+        ];
+        const bandValue = ([lo, hi]) => {
+            const s = Math.max(0, Math.floor(lo / binHz));
+            const e = Math.min(N, Math.ceil(hi / binHz));
+            return avg(freqData, s, e);
+        };
+        const [sub, bass, lowMid, mid, highMid, presence, brilliance] = bandRanges.map(bandValue);
+
+        // ── spectral centroid (brightness) ──
+        let cNum = 0, cDen = 0;
+        for (let i = 0; i < N; i++) {
+            cNum += i * freqData[i];
+            cDen += freqData[i];
+        }
+        const centroid = cDen > 0 ? (cNum / cDen / N) * 255 : 0;
+
+        // ── spectral flatness (tonal vs noise) ──
+        let logSum = 0, arSum = 0, nz = 0;
+        for (let i = 1; i < N; i++) {
+            const m = freqData[i] + 1;
+            logSum += Math.log(m);
+            arSum  += m;
+            nz++;
+        }
+        const geo  = nz > 0 ? Math.exp(logSum / nz) : 0;
+        const arith = nz > 0 ? arSum / nz : 1;
+        const flatness = arith > 0 ? (geo / arith) * 255 : 0;
+
+        // ── spectral flux (positive change) ──
+        let flux = 0;
+        if (this._prevFreq) {
+            for (let i = 0; i < N; i++) {
+                const d = freqData[i] - this._prevFreq[i];
+                if (d > 0) flux += d;
+            }
+            flux /= N;
+        }
+        this._prevFreq = Uint8Array.from(freqData);
+
+        // ── beat detection (adaptive flux threshold) ──
+        this._fluxHistory.push(flux);
+        if (this._fluxHistory.length > 43) this._fluxHistory.shift();
+        let fluxMean = 0;
+        for (const f of this._fluxHistory) fluxMean += f;
+        fluxMean /= this._fluxHistory.length;
+        const now = performance.now();
+        let beat = 0;
+        if (flux > fluxMean * 1.5 && flux > 2 && now - this._lastBeatTime > 200) {
+            beat = 255;
+            this._beatTimes.push(now);
+            if (this._beatTimes.length > 16) this._beatTimes.shift();
+            this._lastBeatTime = now;
+        } else {
+            const dt = (now - this._lastBeatTime) / 1000;
+            beat = Math.max(0, 255 * Math.exp(-dt * 6));
+        }
+
+        // ── BPM (median of beat intervals, clamped 40–240) ──
+        let bpm = this.audioData.bpm || 0;
+        if (this._beatTimes.length >= 4) {
+            const intervals = [];
+            for (let i = 1; i < this._beatTimes.length; i++) {
+                const dt = this._beatTimes[i] - this._beatTimes[i-1];
+                if (dt >= 250 && dt <= 1500) intervals.push(dt);
+            }
+            if (intervals.length >= 3) {
+                intervals.sort((a, b) => a - b);
+                const med = intervals[Math.floor(intervals.length / 2)];
+                bpm = med > 0 ? 60000 / med : 0;
+            }
+        }
+
+        // ── envelope smoothing (fast / slow) ──
+        const prev = this.audioData;
+        const volScaled = volume * 255;
+        const avgF      = analyser.getAverageFrequency();
+        const lerp = (a, b, k) => a + (b - a) * k;
+        const volumeFast = lerp(prev.volumeFast, volScaled, 0.5);
+        const volumeSlow = lerp(prev.volumeSlow, volScaled, 0.05);
+        const avgFast    = lerp(prev.avgFast,    avgF,      0.5);
+        const avgSlow    = lerp(prev.avgSlow,    avgF,      0.05);
+
         this.audioData = {
-            avgFrequency: analyser.getAverageFrequency(),
+            avgFrequency: avgF,
             lowFreq:      avg(freqData, 0,       third),
             midFreq:      avg(freqData, third,   third * 2),
-            highFreq:     avg(freqData, third*2, freqData.length),
+            highFreq:     avg(freqData, third*2, N),
             peak:         Math.max(...freqData),
-            volume:       volume * 255,
+            volume:       volScaled,
+            sub, bass, lowMid, mid, highMid, presence, brilliance,
+            rms, centroid, flatness, flux, zcr,
+            beat, bpm,
+            volumeFast, volumeSlow, avgFast, avgSlow,
             freqData,
+            timeData,
         };
     }
 

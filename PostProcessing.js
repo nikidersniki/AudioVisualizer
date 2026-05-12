@@ -5,6 +5,8 @@ import {
     CanvasTexture, ClampToEdgeWrapping, NearestFilter,
 } from './modules/three.js/build/three.module.js';
 
+import { PropertyBinding } from './Sceneobjects.js';
+
 import { UnrealBloomPass } from './modules/three.js/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { AfterimagePass }  from './modules/three.js/examples/jsm/postprocessing/AfterimagePass.js';
 import { FilmPass }        from './modules/three.js/examples/jsm/postprocessing/FilmPass.js';
@@ -543,13 +545,26 @@ export const PP_NATIVE_REGISTRY = {
 // ─────────────────────────────────────────────
 export class NativePassLayer {
     constructor(passType) {
-        this.id         = crypto.randomUUID();
-        this.passType   = passType;
-        const reg       = PP_NATIVE_REGISTRY[passType];
-        this.name       = reg?.name ?? passType;
-        this.visible    = true;
-        this.properties = { ...(reg?.defaultProperties ?? {}) };
-        this._pass      = null;
+        this.id               = crypto.randomUUID();
+        this.passType         = passType;
+        const reg             = PP_NATIVE_REGISTRY[passType];
+        this.name             = reg?.name ?? passType;
+        this.visible          = true;
+        this.properties       = { ...(reg?.defaultProperties ?? {}) };
+        this.propertyBindings = {}; // { [key]: PropertyBinding } — audio-driven overrides
+        this._pass            = null;
+    }
+
+    resolveProperties(audioData) {
+        if (!audioData) return this.properties;
+        let merged = null;
+        for (const key of Object.keys(this.propertyBindings)) {
+            const b = this.propertyBindings[key];
+            if (!b || b.mode !== 'audio') continue;
+            if (!merged) merged = { ...this.properties };
+            merged[key] = b.resolve(audioData);
+        }
+        return merged ?? this.properties;
     }
 
     get propertyDefs() { return PP_NATIVE_REGISTRY[this.passType]?.propertyDefs ?? []; }
@@ -565,8 +580,11 @@ export class NativePassLayer {
     invalidateMaterial() { this._pass?.dispose?.(); this._pass = null; }
 
     toJSON() {
+        const bindings = {};
+        for (const k of Object.keys(this.propertyBindings)) bindings[k] = this.propertyBindings[k].toJSON();
         return { id: this.id, type: 'native', passType: this.passType,
-                 name: this.name, visible: this.visible, properties: { ...this.properties } };
+                 name: this.name, visible: this.visible,
+                 properties: { ...this.properties }, propertyBindings: bindings };
     }
 
     static fromJSON(d) {
@@ -575,6 +593,10 @@ export class NativePassLayer {
         l.name       = d.name    ?? l.name;
         l.visible    = d.visible ?? true;
         l.properties = { ...l.properties, ...d.properties };
+        if (d.propertyBindings) {
+            for (const k of Object.keys(d.propertyBindings))
+                l.propertyBindings[k] = PropertyBinding.fromJSON(d.propertyBindings[k]);
+        }
         return l;
     }
 }
@@ -584,12 +606,25 @@ export class NativePassLayer {
 // ─────────────────────────────────────────────
 export class PostProcessingLayer {
     constructor(shaderName) {
-        this.id         = crypto.randomUUID();
-        this.shaderName = shaderName;
-        this.name       = PP_SHADER_REGISTRY[shaderName]?.name ?? shaderName;
-        this.visible    = true;
-        this.properties = { ...(PP_SHADER_REGISTRY[shaderName]?.defaultProperties ?? {}) };
-        this._material  = null;
+        this.id               = crypto.randomUUID();
+        this.shaderName       = shaderName;
+        this.name             = PP_SHADER_REGISTRY[shaderName]?.name ?? shaderName;
+        this.visible          = true;
+        this.properties       = { ...(PP_SHADER_REGISTRY[shaderName]?.defaultProperties ?? {}) };
+        this.propertyBindings = {}; // { [key]: PropertyBinding }
+        this._material        = null;
+    }
+
+    resolveProperties(audioData) {
+        if (!audioData) return this.properties;
+        let merged = null;
+        for (const key of Object.keys(this.propertyBindings)) {
+            const b = this.propertyBindings[key];
+            if (!b || b.mode !== 'audio') continue;
+            if (!merged) merged = { ...this.properties };
+            merged[key] = b.resolve(audioData);
+        }
+        return merged ?? this.properties;
     }
 
     getMaterial(w, h) {
@@ -613,14 +648,21 @@ export class PostProcessingLayer {
     invalidateMaterial() { this._material?.dispose(); this._material = null; }
 
     toJSON() {
+        const bindings = {};
+        for (const k of Object.keys(this.propertyBindings)) bindings[k] = this.propertyBindings[k].toJSON();
         return { id: this.id, shaderName: this.shaderName, name: this.name,
-                 visible: this.visible, properties: { ...this.properties } };
+                 visible: this.visible, properties: { ...this.properties }, propertyBindings: bindings };
     }
 
     static fromJSON(d) {
         const l = new PostProcessingLayer(d.shaderName);
         Object.assign(l, d);
         l._material = null;
+        l.propertyBindings = {};
+        if (d.propertyBindings) {
+            for (const k of Object.keys(d.propertyBindings))
+                l.propertyBindings[k] = PropertyBinding.fromJSON(d.propertyBindings[k]);
+        }
         return l;
     }
 }
@@ -659,7 +701,7 @@ export class PostProcessingPipeline {
 
     // finalTarget: if provided, the last pass outputs here instead of to screen.
     // Used by per-layer PP so the result can be composited rather than shown directly.
-    apply(inputTarget, time, finalTarget = null) {
+    apply(inputTarget, time, finalTarget = null, audioData = null) {
         const deltaTime = this._lastTime === undefined ? 0.016 : (time - this._lastTime) / 1000;
         this._lastTime  = time;
 
@@ -685,7 +727,7 @@ export class PostProcessingPipeline {
                 const pass = layer.getPass(this.width, this.height);
                 if (!pass) continue;
                 const reg = PP_NATIVE_REGISTRY[layer.passType];
-                reg?.update(pass, layer.properties, this.width, this.height);
+                reg?.update(pass, layer.resolveProperties(audioData), this.width, this.height);
 
                 if (isLast && finalTarget === null) {
                     // Normal path: render to screen
@@ -721,7 +763,7 @@ export class PostProcessingPipeline {
             if (!mat) continue;
 
             PP_SHADER_REGISTRY[layer.shaderName]
-                ?.updateUniforms(mat.uniforms, layer.properties, time, this.width, this.height);
+                ?.updateUniforms(mat.uniforms, layer.resolveProperties(audioData), time, this.width, this.height);
             mat.uniforms.tDiffuse.value = srcTarget.texture;
             this._quad.material = mat;
 

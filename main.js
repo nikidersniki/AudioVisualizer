@@ -120,7 +120,7 @@ const builder = new SceneBuilder(canvas);
 const listener = new AudioListener();
 builder.camera.add(listener);
 const sound    = new Audio(listener);
-const analyser = new AudioAnalyser(sound, 256);
+const analyser = new AudioAnalyser(sound, 1024);
 
 let audioBuffer = null;
 let syncedVideoObjId = null;
@@ -135,7 +135,10 @@ let allTracks    = [];   // { id, file, name, ... } in display order
 let currentTrackId = null;
 const customCatalogues = { hdri: [], bg: [], video: [] }; // { name, dataURL } — persisted in global layer
 let animatedProperties = []; // [{ objectId, key, label }] — persisted in global layer
+let animTab = 'obj'; // 'obj' | 'pp'
 const _animBtnRefreshers = []; // refresh fns for currently rendered property-panel animate buttons
+const _ppAnimBtnRefreshers = []; // refresh fns for PP property-panel animate buttons
+const _audioInlineMeterUpdaters = []; // fns(audioData) for mini-meters next to Source dropdowns
 
 // ─────────────────────────────────────────────
 //  IndexedDB
@@ -325,24 +328,61 @@ function findObjectById(id) {
     return null;
 }
 
+function findPPLayerById(id) {
+    for (const [contextId, ctx] of ppContexts) {
+        const ppLayer = ctx.layers?.find(l => l.id === id);
+        if (ppLayer) return { ppLayer, contextId };
+    }
+    return null;
+}
+
 function isPropertyAnimated(objectId, key) {
     return animatedProperties.some(e => e.objectId === objectId && e.key === key);
 }
 
-function toggleAnimatedProperty(objectId, key, label, range = { min: -10, max: 10 }) {
+function toggleAnimatedProperty(objectId, key, label, range = { min: -10, max: 10 }, opts = {}) {
     const idx = animatedProperties.findIndex(e => e.objectId === objectId && e.key === key);
     if (idx >= 0) {
         animatedProperties.splice(idx, 1);
-        const found = findObjectById(objectId);
-        if (found && found.obj[key]) found.obj[key].mode = 'constant';
+        if (opts.isPP) {
+            const found = findPPLayerById(objectId);
+            if (found?.ppLayer) {
+                delete found.ppLayer.propertyBindings[key];
+                found.ppLayer.invalidateMaterial?.();
+            }
+        } else {
+            const found = findObjectById(objectId);
+            if (found && found.obj[key]) found.obj[key].mode = 'constant';
+        }
     } else {
-        animatedProperties.push({ objectId, key, label, range });
-        const found = findObjectById(objectId);
-        if (found && found.obj[key]) found.obj[key].mode = 'audio';
+        const entry = { objectId, key, label, range };
+        if (opts.isPP) {
+            entry.isPP = true;
+            entry.ppContextId = opts.ppContextId ?? null;
+            const found = findPPLayerById(objectId);
+            if (found?.ppLayer) {
+                const cur = found.ppLayer.propertyBindings[key];
+                if (cur) {
+                    cur.mode = 'audio';
+                } else {
+                    const b = new PropertyBinding(found.ppLayer.properties[key] ?? 0);
+                    b.mode   = 'audio';
+                    b.source = 'beat';
+                    b.min    = range.min;
+                    b.max    = range.max;
+                    found.ppLayer.propertyBindings[key] = b;
+                }
+            }
+        } else {
+            const found = findObjectById(objectId);
+            if (found && found.obj[key]) found.obj[key].mode = 'audio';
+        }
+        animatedProperties.push(entry);
     }
     saveAllToDB();
     renderAnimationList();
-    for (const fn of _animBtnRefreshers) fn();
+    for (const fn of _animBtnRefreshers)   fn();
+    for (const fn of _ppAnimBtnRefreshers) fn();
 }
 
 function _animPropRow(labelText, control) {
@@ -372,6 +412,33 @@ function _animSliderControl(value, range, step, onChange) {
     return wrap;
 }
 
+function _animSourceControl(binding, onChange) {
+    const wrap = document.createElement('div');
+    wrap.style.display = 'flex';
+    wrap.style.alignItems = 'center';
+    wrap.style.flex = '1';
+    wrap.style.gap = '4px';
+    const setTitle = () => { wrap.title = AUDIO_SOURCE_DESC[binding.source] || binding.source; };
+    const sel = _animSelectControl(AUDIO_SOURCES, binding.source, v => {
+        binding.source = v;
+        setTitle();
+        onChange();
+    });
+    setTitle();
+    const meter = document.createElement('div');
+    meter.className = 'audio-mini-meter';
+    const fill = document.createElement('span');
+    meter.appendChild(fill);
+    wrap.appendChild(sel);
+    wrap.appendChild(meter);
+    _audioInlineMeterUpdaters.push((ad) => {
+        const raw = ad[binding.source] ?? 0;
+        const norm = binding.source === 'bpm' ? raw / 240 : raw / 255;
+        fill.style.width = (Math.min(1, Math.max(0, norm)) * 100) + '%';
+    });
+    return wrap;
+}
+
 function _animSelectControl(options, value, onChange) {
     const sel = document.createElement('select');
     sel.className = 'prop-select';
@@ -385,30 +452,61 @@ function _animSelectControl(options, value, onChange) {
     return sel;
 }
 
+function _setupAnimTabs() {
+    const objBtn = document.getElementById('anim-tab-obj');
+    const ppBtn  = document.getElementById('anim-tab-pp');
+    if (!objBtn || !ppBtn) return;
+    const setTab = (t) => {
+        animTab = t;
+        objBtn.classList.toggle('selected', t === 'obj');
+        ppBtn.classList.toggle('selected',  t === 'pp');
+        renderAnimationList();
+    };
+    objBtn.addEventListener('click', () => setTab('obj'));
+    ppBtn.addEventListener('click',  () => setTab('pp'));
+}
+
 function renderAnimationList() {
     const list = document.getElementById('anim-list');
     list.innerHTML = '';
+    _audioInlineMeterUpdaters.length = 0;
 
-    animatedProperties = animatedProperties.filter(e => findObjectById(e.objectId));
+    animatedProperties = animatedProperties.filter(e =>
+        e.isPP ? findPPLayerById(e.objectId) : findObjectById(e.objectId));
 
-    if (animatedProperties.length === 0) {
+    const visible = animatedProperties.filter(e => animTab === 'pp' ? e.isPP : !e.isPP);
+
+    if (visible.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'anim-empty';
-        empty.textContent = 'No animated properties yet — click the ● icon next to any property.';
+        empty.textContent = animTab === 'pp'
+            ? 'No animated post-processing properties yet — click the ● next to any PP slider.'
+            : 'No animated object properties yet — click the ● next to any property.';
         list.appendChild(empty);
         return;
     }
 
     const byObject = new Map();
-    for (const entry of animatedProperties) {
+    for (const entry of visible) {
         if (!byObject.has(entry.objectId)) byObject.set(entry.objectId, []);
         byObject.get(entry.objectId).push(entry);
     }
 
     for (const [objectId, entries] of byObject) {
-        const found = findObjectById(objectId);
-        if (!found) continue;
-        const { obj } = found;
+        const firstEntry = entries[0];
+        const isPP = !!firstEntry.isPP;
+        let displayName, getBinding;
+        if (isPP) {
+            const pp = findPPLayerById(objectId);
+            if (!pp) continue;
+            displayName = `PP: ${pp.ppLayer.name}`;
+            getBinding = (key) => pp.ppLayer.propertyBindings[key];
+        } else {
+            const found = findObjectById(objectId);
+            if (!found) continue;
+            displayName = found.obj.name || found.obj.type;
+            getBinding = (key) => found.obj[key];
+        }
 
         const groupWrap = document.createElement('div');
         groupWrap.className = 'anim-group';
@@ -419,7 +517,7 @@ function renderAnimationList() {
         arrow.className = 'anim-object-arrow';
         arrow.textContent = '▾';
         const title = document.createElement('span');
-        title.textContent = obj.name || obj.type;
+        title.textContent = displayName;
         header.appendChild(arrow);
         header.appendChild(title);
         groupWrap.appendChild(header);
@@ -428,7 +526,7 @@ function renderAnimationList() {
         body.className = 'anim-group-body';
 
         for (const entry of entries) {
-            const binding = obj[entry.key];
+            const binding = getBinding(entry.key);
             if (!binding) continue;
             const range = entry.range ?? { min: -10, max: 10 };
 
@@ -448,7 +546,8 @@ function renderAnimationList() {
             rm.title = 'Remove';
             rm.addEventListener('click', e => {
                 e.stopPropagation();
-                toggleAnimatedProperty(entry.objectId, entry.key, entry.label, range);
+                toggleAnimatedProperty(entry.objectId, entry.key, entry.label, range,
+                    entry.isPP ? { isPP: true, ppContextId: entry.ppContextId } : {});
             });
             propHead.appendChild(propName);
             propHead.appendChild(propArrow);
@@ -460,7 +559,7 @@ function renderAnimationList() {
             propBody.style.display = 'none';
 
             propBody.appendChild(_animPropRow('Source',
-                _animSelectControl(AUDIO_SOURCES, binding.source, v => { binding.source = v; saveAllToDB(); })));
+                _animSourceControl(binding, () => saveAllToDB())));
             propBody.appendChild(_animPropRow('Curve',
                 _animSelectControl(CURVES, binding.curve, v => { binding.curve = v; saveAllToDB(); })));
             propBody.appendChild(_animPropRow('Min',
@@ -608,6 +707,7 @@ async function loadLayersFromFile(file) {
                 if (data) {
                     await deserializeAll(data);
                     renderLayerList();
+                    renderAnimationList();
                     switchPPContext('global');
                     if (builder.layers.length > 0) selectLayer(builder.layers[0]);
                     await saveAllToDB();
@@ -947,7 +1047,7 @@ function spawnPopup(title, popupFields) {
 
             inputBox.appendChild(box);
 
-            inputs.push({ input, type, required, label: text });
+            inputs.push({ input, type, required: type === 'preview' ? false : required, label: text });
         });
 
         // Model preview -> auto-fill Name input
@@ -1325,6 +1425,7 @@ function addPPLayerElement(ppLayer) {
 function renderPPLayerProperties(ppLayer) {
     const panel = document.getElementById('pp-layer-properties');
     panel.innerHTML = '';
+    _ppAnimBtnRefreshers.length = 0;
 
     const defs = ppLayer.propertyDefs ?? PP_SHADER_REGISTRY[ppLayer.shaderName]?.propertyDefs;
     if (!defs) return;
@@ -1387,6 +1488,27 @@ function renderPPLayerProperties(ppLayer) {
 
             wrap.appendChild(slider);
             wrap.appendChild(num);
+
+            const range = { min: def.min ?? 0, max: def.max ?? 1 };
+            const animBtn = document.createElement('div');
+            animBtn.className = 'prop-animate-btn';
+            animBtn.textContent = '●';
+            animBtn.title = 'Animate (audio sync)';
+            const refresh = () => {
+                const on = !!ppLayer.propertyBindings[def.key];
+                animBtn.classList.toggle('active', on);
+                slider.disabled = on;
+                num.disabled    = on;
+                rowEl.classList.toggle('animated', on);
+            };
+            refresh();
+            animBtn.addEventListener('click', () => {
+                toggleAnimatedProperty(ppLayer.id, def.key, def.label, range,
+                    { isPP: true, ppContextId });
+            });
+            _ppAnimBtnRefreshers.push(refresh);
+            wrap.appendChild(animBtn);
+
             rowEl.appendChild(wrap);
         } else if (def.type === 'color') {
             const inp = document.createElement('input');
@@ -1696,7 +1818,12 @@ function selectObject(obj, layer) {
 //  Property panel builder
 // ─────────────────────────────────────────────
 
-const AUDIO_SOURCES = ['avgFrequency','lowFreq','midFreq','highFreq','peak','volume'];
+const AUDIO_SOURCES = [
+    'sub','bass','lowMid','mid','highMid','presence','brilliance',
+    'rms','centroid','flatness','flux','zcr',
+    'beat','bpm',
+    'volumeFast','volumeSlow','avgFast','avgSlow',
+];
 const CURVES        = ['linear','exponential','inverse'];
 
 function renderObjectProperties(obj, layer) {
@@ -1937,12 +2064,13 @@ function renderObjectProperties(obj, layer) {
     const _pRotZ = bindingPanel('Rotation Z', obj.rotZ);
 
     section('Scale');
+    const _pGlobal = bindingPanel('Scale',   obj.globalScale);
     const _pScaleX = bindingPanel('Scale X', obj.scaleX);
     const _pScaleY = bindingPanel('Scale Y', obj.scaleY);
     const _pScaleZ = bindingPanel('Scale Z', obj.scaleZ);
 
     _gizmoLiveRefresh = () => {
-        [_pPosX, _pPosY, _pPosZ, _pRotX, _pRotY, _pRotZ, _pScaleX, _pScaleY, _pScaleZ]
+        [_pPosX, _pPosY, _pPosZ, _pRotX, _pRotY, _pRotZ, _pScaleX, _pScaleY, _pScaleZ, _pGlobal]
             .forEach(p => p.refreshFromBinding());
     };
 
@@ -2272,6 +2400,14 @@ function renderObjectProperties(obj, layer) {
 
         section('Audio Scale');
         bindingPanel('Audio Scale', obj.audioScale);
+
+        section('Spin');
+        bindingPanel('Spin Speed', obj.spinSpeed);
+        selectInput('Spin Axis',
+            ['+x', '-x', '+y', '-y', '+z', '-z'],
+            () => obj.spinAxis ?? '+z',
+            v => { obj.spinAxis = v; }
+        );
     }
 }
 
@@ -2318,7 +2454,7 @@ async function onAddModel(layer, model, modelDiplayName, Material) {
 function onAddLight(layer) {
     const lightObj = new PointLightObject();
     lightObj.intensity.mode   = 'audio';
-    lightObj.intensity.source = 'avgFrequency';
+    lightObj.intensity.source = 'beat';
     lightObj.intensity.min    = 0;
     lightObj.intensity.max    = 10;
 
@@ -2335,7 +2471,7 @@ function onAddWave(layer, data) {
     waveObj.segments   = Math.max(2, parseInt(data['Segments']) || 64);
     waveObj.color      = /^#[0-9a-fA-F]{6}$/.test(data['Color']) ? data['Color'] : '#ffffff';
     waveObj.amplitude.mode  = 'audio';
-    waveObj.amplitude.source = 'avgFrequency';
+    waveObj.amplitude.source = 'beat';
     waveObj.amplitude.min   = 0;
     waveObj.amplitude.max   = 1;
     builder.addWaveToLayer(layer.id, waveObj);
@@ -2531,6 +2667,7 @@ window.addEventListener('load', async () => {
     }
     renderLayerList();
     renderAnimationList();
+    _setupAnimTabs();
     switchPPContext('global');
 
     if (builder.layers.length > 0) selectLayer(builder.layers[0]);
@@ -2543,30 +2680,50 @@ window.addEventListener('load', async () => {
     document.getElementById('anim-btn').addEventListener('click',   () => switchTab('anim'));
     requestAnimationFrame(_updateTabPill);
 
-    // PP context pills
-    const pillGlobal = document.getElementById('pp-pill-global');
-    const pillLayer  = document.getElementById('pp-pill-layer');
-    pillGlobal?.addEventListener('click', () => switchPPContext('global'));
-    pillLayer?.addEventListener('click', () => {
+    // Gizmo mode switch (header)
+    _setupGizmoModeSwitch();
+
+    // PP context tabs
+    const tabGlobal = document.getElementById('pp-tab-global');
+    const tabLayer  = document.getElementById('pp-tab-layer');
+    tabGlobal?.addEventListener('click', () => switchPPContext('global'));
+    tabLayer?.addEventListener('click', () => {
         if (!currentSelectedLayerId) return;
         switchPPContext(currentSelectedLayerId);
     });
     updatePPPills();
 });
 
+function _setupGizmoModeSwitch() {
+    const els = {
+        translate: document.getElementById('gizmo-mode-translate'),
+        rotate:    document.getElementById('gizmo-mode-rotate'),
+        scale:     document.getElementById('gizmo-mode-scale'),
+    };
+    if (!els.translate) return;
+    const refresh = (mode) => {
+        for (const m of Object.keys(els)) els[m]?.classList.toggle('selected', m === mode);
+    };
+    for (const m of Object.keys(els)) {
+        els[m]?.addEventListener('click', () => builder.setGizmoMode(m));
+    }
+    window.addEventListener('gizmo-mode-changed', e => refresh(e.detail.mode));
+    refresh(builder.getGizmoMode());
+}
+
 function updatePPPills() {
-    const pillGlobal = document.getElementById('pp-pill-global');
-    const pillLayer  = document.getElementById('pp-pill-layer');
-    if (!pillGlobal || !pillLayer) return;
+    const tabGlobal = document.getElementById('pp-tab-global');
+    const tabLayer  = document.getElementById('pp-tab-layer');
+    if (!tabGlobal || !tabLayer) return;
 
     const layer = currentSelectedLayerId
         ? builder.layers.find(l => l.id === currentSelectedLayerId)
         : null;
-    pillLayer.textContent = layer ? `Layer: ${layer.name}` : 'Layer: —';
-    pillLayer.classList.toggle('is-disabled', !layer);
+    tabLayer.textContent = layer ? `Layer: ${layer.name}` : 'Layer: —';
+    tabLayer.classList.toggle('is-disabled', !layer);
 
-    pillGlobal.classList.toggle('selected', ppContextId === 'global');
-    pillLayer.classList.toggle('selected',  ppContextId !== 'global' && ppContextId === currentSelectedLayerId);
+    tabGlobal.classList.toggle('selected', ppContextId === 'global');
+    tabLayer.classList.toggle('selected',  ppContextId !== 'global' && ppContextId === currentSelectedLayerId);
 }
 
 
@@ -2580,8 +2737,124 @@ if (typeof ResizeObserver !== 'undefined' && _freqPreviewCanvas) {
     new ResizeObserver(_drawWaveformPreview).observe(_freqPreviewCanvas);
 }
 
+// ── Audio Monitor (live spectrum + waveform + per-source meters) ──
+const _audioMonitorEls = {
+    monitor:  document.getElementById('audio-monitor'),
+    spectrum: document.getElementById('audio-spectrum'),
+    waveform: document.getElementById('audio-waveform'),
+    beatDot:  document.getElementById('audio-beat-dot'),
+    bpm:      document.getElementById('audio-bpm'),
+    meters:   document.getElementById('audio-meters'),
+};
+const AUDIO_SOURCE_DESC = {
+    sub:        'Sub-bass energy (20–60 Hz). Felt more than heard — kick drums, bass drops.',
+    bass:       'Bass energy (60–250 Hz). Kick drums, bass guitar fundamentals.',
+    lowMid:     'Low-mid (250–500 Hz). Body of most instruments and vocals.',
+    mid:        'Mid-range (500–2000 Hz). Where most musical content sits.',
+    highMid:    'High-mid (2–4 kHz). Vocal presence, attack of percussion.',
+    presence:   'Presence band (4–6 kHz). Clarity, definition, snare crack.',
+    brilliance: 'Brilliance / air (6+ kHz). Cymbals, sibilance, sparkle.',
+    rms:        'True loudness from the raw waveform. Smoother than spectral averages.',
+    centroid:   'Spectral centroid — perceived brightness. High = treble-heavy sound.',
+    flatness:   'Tonal vs noisy character. Low = pure tone, high = noise (cymbals, hiss).',
+    flux:       'Total spectral change between frames. Spikes on new notes / transients.',
+    zcr:        'Zero-crossing rate. Cheap pitch / noisiness proxy.',
+    beat:       'Pulses to max on detected beats, decays between. Best for rhythmic motion.',
+    bpm:        'Estimated tempo (40–240 BPM). Use min/max to remap to a useful range.',
+    volumeFast: 'Volume envelope, fast attack. Snappy follower.',
+    volumeSlow: 'Volume envelope, slow attack. Sustained average.',
+    avgFast:    'Average frequency, fast-smoothed.',
+    avgSlow:    'Average frequency, slow-smoothed.',
+};
+const _audioMeterBars = new Map();
+(function _buildAudioMeters() {
+    if (!_audioMonitorEls.meters) return;
+    _audioMonitorEls.meters.innerHTML = '';
+    for (const key of AUDIO_SOURCES) {
+        const wrap = document.createElement('div');
+        wrap.className = 'audio-meter-cube-wrap';
+        wrap.title = AUDIO_SOURCE_DESC[key] || key;
+        const cube = document.createElement('div');
+        cube.className = 'audio-meter-cube';
+        const fill = document.createElement('div');
+        fill.className = 'audio-meter-cube-fill';
+        const lbl = document.createElement('div');
+        lbl.className = 'audio-meter-cube-label';
+        lbl.textContent = key;
+        cube.appendChild(fill);
+        wrap.appendChild(cube);
+        wrap.appendChild(lbl);
+        _audioMonitorEls.meters.appendChild(wrap);
+        _audioMeterBars.set(key, { fill });
+    }
+})();
+
+function _updateAudioMonitor(ad) {
+    if (!ad || !_audioMonitorEls.monitor) return;
+    if (_audioMonitorEls.monitor.offsetParent === null) return; // window closed / stashed
+
+    const sc = _audioMonitorEls.spectrum;
+    if (sc && ad.freqData) {
+        const ctx2 = sc.getContext('2d');
+        const w = sc.width, h = sc.height;
+        ctx2.clearRect(0, 0, w, h);
+        const NBars = 64;
+        const data = ad.freqData;
+        // Log-binned spectrum: only show ~0–11 kHz (right half is mostly silent
+        // for music) and distribute bars logarithmically so lows are readable.
+        const minBin = 1;
+        const maxBin = Math.max(2, Math.floor(data.length * 0.5));
+        const logMin = Math.log(minBin);
+        const logMax = Math.log(maxBin);
+        const bw = w / NBars;
+        ctx2.fillStyle = '#c8f035';
+        for (let i = 0; i < NBars; i++) {
+            const a = Math.exp(logMin + (logMax - logMin) * (i / NBars));
+            const b = Math.exp(logMin + (logMax - logMin) * ((i + 1) / NBars));
+            const s = Math.max(minBin, Math.floor(a));
+            const e = Math.min(maxBin, Math.max(s + 1, Math.ceil(b)));
+            let sum = 0;
+            for (let j = s; j < e; j++) sum += data[j];
+            const v = (sum / (e - s)) / 255;
+            const bh = v * h;
+            ctx2.fillRect(i * bw, h - bh, bw - 1, bh);
+        }
+    }
+
+    const wf = _audioMonitorEls.waveform;
+    if (wf && ad.timeData) {
+        const ctx2 = wf.getContext('2d');
+        const w = wf.width, h = wf.height;
+        ctx2.clearRect(0, 0, w, h);
+        ctx2.strokeStyle = '#c8f035';
+        ctx2.lineWidth = 1;
+        ctx2.beginPath();
+        const N = ad.timeData.length;
+        const step = Math.max(1, Math.floor(N / w));
+        for (let x = 0; x < w; x++) {
+            const v = (ad.timeData[x * step] - 128) / 128;
+            const y = h / 2 - v * (h / 2 - 1);
+            if (x === 0) ctx2.moveTo(x, y); else ctx2.lineTo(x, y);
+        }
+        ctx2.stroke();
+    }
+
+    if (_audioMonitorEls.beatDot)
+        _audioMonitorEls.beatDot.classList.toggle('hit', (ad.beat ?? 0) > 80);
+    if (_audioMonitorEls.bpm)
+        _audioMonitorEls.bpm.textContent = `BPM: ${ad.bpm > 0 ? Math.round(ad.bpm) : '--'}`;
+
+    for (const [key, { fill }] of _audioMeterBars) {
+        const raw = ad[key] ?? 0;
+        const norm = key === 'bpm' ? raw / 240 : raw / 255;
+        fill.style.height = (Math.min(1, Math.max(0, norm)) * 100) + '%';
+    }
+}
+
 function animate(time) {
     builder.updateAudioData(analyser, Volume);
+    _updateAudioMonitor(builder.audioData);
+    for (const fn of _audioInlineMeterUpdaters) fn(builder.audioData);
     updateProgressBar();
     _drawWaveformPreview();
     _syncVideoToAudio();

@@ -32,6 +32,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         const objEditor = document.getElementById('current-layer-controls');
         const ppSection = document.getElementById('pp-section');
         const animSec   = document.getElementById('anim-section');
+        const audioMon  = document.getElementById('audio-monitor');
         const player    = document.getElementById('player');
         const progress  = document.getElementById('progress-bar-container');
         const nowPlay   = document.getElementById('now-playing');
@@ -42,6 +43,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         if (objEditor) objEditor.style.display = '';
         if (ppSection) ppSection.style.display = '';
         if (animSec)   animSec.style.display = '';
+        if (audioMon)  audioMon.style.display = '';
         if (layers)    layers.style.display = '';
 
         // Viewport host: canvas wrapped in a frame so it can be letterboxed for fixed aspect
@@ -52,6 +54,8 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         if (canvas)  viewportFrame.appendChild(canvas);
         viewportHost.appendChild(viewportFrame);
         if (dragDrop) viewportHost.appendChild(dragDrop);
+        const gizmoSwitch = document.getElementById('gizmo-mode-switch');
+        if (gizmoSwitch) viewportHost.appendChild(gizmoSwitch);
 
         // Outliner host: layers + object-list (object-list is plucked out of #current-layer-controls)
         const outlinerHost = document.createElement('div');
@@ -65,7 +69,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         if (nowPlay)  progressHost.appendChild(nowPlay);
         if (progress) progressHost.appendChild(progress);
 
-        [viewportHost, outlinerHost, objEditor, ppSection, animSec, player, progressHost, controlls, projSet]
+        [viewportHost, outlinerHost, objEditor, ppSection, animSec, audioMon, player, progressHost, controlls, projSet]
             .filter(Boolean).forEach(h => stash.appendChild(h));
 
         // ── Component definitions ─────────────────────────
@@ -76,6 +80,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
             'object-editor':   { title: 'Object Editor',   hostId: 'current-layer-controls' },
             'post-processing': { title: 'Post Processing', hostId: 'pp-section' },
             'animation':       { title: 'Animation',       hostId: 'anim-section' },
+            'audio-monitor':   { title: 'Audio Monitor',   hostId: 'audio-monitor' },
             'progress-bar':    { title: 'Player',          hostId: 'progress-host' },
             'settings':        { title: 'Settings',        hostId: 'controlls' },
             'project-settings':{ title: 'Project Settings', hostId: 'project-settings' }

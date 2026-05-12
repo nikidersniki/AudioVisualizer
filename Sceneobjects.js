@@ -6,7 +6,7 @@ export class PropertyBinding {
     constructor(defaultValue = 1) {
         this.mode   = 'constant';       // 'constant' | 'audio'
         this.value  = defaultValue;     // used when mode === 'constant'
-        this.source = 'avgFrequency';   // audio signal key
+        this.source = 'beat';           // audio signal key
         this.min    = 0;                // remap range
         this.max    = 1;
         this.curve  = 'linear';         // 'linear' | 'exponential' | 'inverse'
@@ -52,6 +52,7 @@ export class SceneObject {
         this.scaleX = new PropertyBinding(1);
         this.scaleY = new PropertyBinding(1);
         this.scaleZ = new PropertyBinding(1);
+        this.globalScale = new PropertyBinding(1);
 
         this.threeObject = null; // live Three.js object — never serialized
     }
@@ -70,10 +71,11 @@ export class SceneObject {
             this.rotY.resolve(audioData),
             this.rotZ.resolve(audioData)
         );
+        const g = this.globalScale.resolve(audioData);
         this.threeObject.scale.set(
-            this.scaleX.resolve(audioData),
-            this.scaleY.resolve(audioData),
-            this.scaleZ.resolve(audioData)
+            this.scaleX.resolve(audioData) * g,
+            this.scaleY.resolve(audioData) * g,
+            this.scaleZ.resolve(audioData) * g
         );
     }
 
@@ -145,10 +147,11 @@ export class ModelObject extends SceneObject {
         this.threeObject.visible = this.visible;
 
         const s = this.audioScale.resolve(audioData);
+        const g = this.globalScale.resolve(audioData);
         this.threeObject.scale.set(
-            this.scaleX.resolve(audioData) * s * 0.01,
-            this.scaleY.resolve(audioData) * s * 0.01,
-            this.scaleZ.resolve(audioData) * s * 0.01
+            this.scaleX.resolve(audioData) * s * g * 0.01,
+            this.scaleY.resolve(audioData) * s * g * 0.01,
+            this.scaleZ.resolve(audioData) * s * g * 0.01
         );
 
         this.threeObject.position.set(
@@ -253,6 +256,8 @@ export class FillObject extends SceneObject {
         this.videoName    = null;
         this.playbackRate = 1;
         this.audioScale   = new PropertyBinding(1);
+        this.spinSpeed    = new PropertyBinding(0);
+        this.spinAxis     = '+z';
         this.opacity      = 1;
     }
 
@@ -260,10 +265,11 @@ export class FillObject extends SceneObject {
         if (!this.threeObject) return;
         this.threeObject.visible = this.visible;
         const s = this.audioScale.resolve(audioData);
+        const g = this.globalScale.resolve(audioData);
         this.threeObject.scale.set(
-            this.scaleX.resolve(audioData) * s,
-            this.scaleY.resolve(audioData) * s,
-            this.scaleZ.resolve(audioData) * s
+            this.scaleX.resolve(audioData) * s * g,
+            this.scaleY.resolve(audioData) * s * g,
+            this.scaleZ.resolve(audioData) * s * g
         );
         this.threeObject.position.set(
             this.posX.resolve(audioData),

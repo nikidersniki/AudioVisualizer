@@ -40,6 +40,12 @@
       <div class="h2">Revisualize 3D</div>
     </header>
     <div id="gl-container"></div>
+    <div id="gizmo-mode-switch">
+      <div id="gizmo-mode-pill"></div>
+      <div id="gizmo-mode-translate" class="gizmo-mode-tab selected" data-shortcut="T">Move</div>
+      <div id="gizmo-mode-rotate"    class="gizmo-mode-tab"          data-shortcut="R">Rotate</div>
+      <div id="gizmo-mode-scale"     class="gizmo-mode-tab"          data-shortcut="S">Scale</div>
+    </div>
     <main>
       <div id="drag-drop"></div>
       <canvas id="three-canvas"></canvas>
@@ -121,9 +127,10 @@
           <div id="object-properties"></div>
         </div>
         <div id="pp-section" style="display:none">
-          <div id="pp-context-pills">
-            <div id="pp-pill-global" class="pp-pill selected">Global</div>
-            <div id="pp-pill-layer" class="pp-pill is-disabled">Layer: —</div>
+          <div id="pp-tab-switch">
+            <div id="pp-tab-pill"></div>
+            <div id="pp-tab-global" class="pp-tab selected">Global</div>
+            <div id="pp-tab-layer"  class="pp-tab is-disabled">Layer: —</div>
           </div>
           <div class="h2" id="pp-context-title">Global</div>
           <div id="pp-top-buttons"></div>
@@ -131,8 +138,22 @@
           <div id="pp-layer-properties"></div>
         </div>
         <div id="anim-section" style="display:none">
-          <div class="h2">Animated Properties</div>
+          <div id="anim-tab-switch">
+            <div id="anim-tab-pill"></div>
+            <div id="anim-tab-obj" class="anim-tab selected">Objects</div>
+            <div id="anim-tab-pp"  class="anim-tab">Post Processing</div>
+          </div>
           <div id="anim-list"></div>
+        </div>
+        <div id="audio-monitor" style="display:none">
+          <canvas id="audio-spectrum" width="280" height="80"></canvas>
+          <canvas id="audio-waveform" width="280" height="40"></canvas>
+          <div id="audio-beat-row">
+            <span id="audio-beat-dot">●</span>
+            <span class="audio-beat-label">BEAT</span>
+            <span id="audio-bpm">BPM: --</span>
+          </div>
+          <div id="audio-meters"></div>
         </div>
       </div>
 
