@@ -955,13 +955,13 @@ header .h2 {
 }
 .image-button:hover { opacity: 1; background-color: var(--bg-hover); }
 
-#add-layer    { background-image: url('Graphics/plus-svgrepo-com.svg'); }
-.move-up      { background-image: url('Graphics/arrowup-svgrepo-com.svg'); }
-.move-down    { background-image: url('Graphics/arrowdown-svgrepo-com.svg'); }
-.remove-layer     { background-image: url('Graphics/minus-svgrepo-com.svg'); }
+#add-layer    { background-image: url('/Graphics/plus-svgrepo-com.svg'); }
+.move-up      { background-image: url('/Graphics/arrowup-svgrepo-com.svg'); }
+.move-down    { background-image: url('/Graphics/arrowdown-svgrepo-com.svg'); }
+.remove-layer     { background-image: url('/Graphics/minus-svgrepo-com.svg'); }
 
 .duplicate-object {
-    background-image: url('Graphics/duplicate-svgrepo-com.svg');
+    background-image: url('/Graphics/duplicate-svgrepo-com.svg');
 }
 
 .obj-btn-group {
