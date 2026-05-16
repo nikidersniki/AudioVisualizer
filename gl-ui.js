@@ -75,7 +75,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         // ── Component definitions ─────────────────────────
         const COMPONENTS = {
             'viewport':        { title: 'Viewport',        hostId: 'viewport-host' },
-            'saved-tracks':    { title: 'Saved Tracks',    hostId: 'player' },
+            'saved-tracks':    { title: 'Audio Source',    hostId: 'player' },
             'outliner':        { title: 'Outliner',        hostId: 'outliner-host' },
             'object-editor':   { title: 'Object Editor',   hostId: 'current-layer-controls' },
             'post-processing': { title: 'Post Processing', hostId: 'pp-section' },
@@ -141,7 +141,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
                         type: 'column',
                         content: [
                             { type: 'component', componentType: 'outliner',     title: 'Outliner' },
-                            { type: 'component', componentType: 'saved-tracks', title: 'Saved Tracks' }
+                            { type: 'component', componentType: 'saved-tracks', title: 'Audio Source' }
                         ]
                     },
                     {

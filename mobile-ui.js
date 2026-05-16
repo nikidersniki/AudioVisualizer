@@ -15,7 +15,7 @@
             <div id="drawer-handle"><div class="drawer-grip"></div></div>
             <div id="drawer-top-slot"></div>
             <div id="drawer-tabs">
-                <div class="drawer-tab" data-tab="tracks">Saved Tracks</div>
+                <div class="drawer-tab" data-tab="tracks">Audio Source</div>
                 <div class="drawer-tab selected" data-tab="controls">Controls</div>
             </div>
             <div id="drawer-body"></div>

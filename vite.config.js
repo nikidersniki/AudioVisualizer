@@ -35,6 +35,7 @@ function serveDocsPlugin() {
 
     function resolveDocFile(urlPath) {
         let rel = urlPath.replace(new RegExp('^' + DOCS_MOUNT), '');
+        try { rel = decodeURIComponent(rel); } catch {}
         if (rel === '' || rel === '/') return path.join(docsOutDir, 'index.html');
 
         let target = path.join(docsOutDir, rel);

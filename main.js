@@ -993,6 +993,7 @@ function resumeAudio() {
 }
 
 function loadAudioFromRecord(record) {
+    _stopSystemCapture(); // file playback takes over
     currentTrackId = record.id ?? null;
     setPlayingTrackById(currentTrackId);
     const reader = new FileReader();
@@ -2605,10 +2606,82 @@ document.getElementById('add-layer').addEventListener('click', async () => {
     await saveAllToDB();
 });
 
+// ─────────────────────────────────────────────
+//  System audio capture (getDisplayMedia)
+// ─────────────────────────────────────────────
+let _captureStream = null;
+let _captureSource = null;
+
+function _stopSystemCapture() {
+    if (_captureSource) {
+        try { _captureSource.disconnect(); } catch {}
+        _captureSource = null;
+    }
+    if (_captureStream) {
+        _captureStream.getTracks().forEach(t => t.stop());
+        _captureStream = null;
+    }
+    const btn = document.getElementById('capture-audio-btn');
+    if (btn) btn.textContent = 'Capture System Audio';
+}
+
+async function _startSystemCapture() {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+        alert('getDisplayMedia is not supported in this browser.');
+        return;
+    }
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: true,
+        });
+    } catch (err) {
+        if (err?.name !== 'NotAllowedError') console.warn('Capture failed:', err);
+        return;
+    }
+    if (stream.getAudioTracks().length === 0) {
+        alert('No audio track in the share. In the picker, tick "Share audio" (Chrome tab or system audio).');
+        stream.getTracks().forEach(t => t.stop());
+        return;
+    }
+    // Drop the video — we only need the audio
+    stream.getVideoTracks().forEach(t => t.stop());
+
+    // Stop the previous file-based playback
+    if (sound.isPlaying) { sound.onEnded = null; sound.stop(); }
+    audioBuffer = null;
+    isPlaying   = false;
+    progressFill.style.width = '0%';
+    currentTimeDisplay.textContent = '0:00';
+    durationDisplay.textContent    = 'LIVE';
+
+    // Route the live stream into the existing AnalyserNode so the visualizer
+    // sees it. Do NOT connect to destination — the user is already hearing
+    // the audio from its original source app, and routing back would feedback.
+    const ctx = listener.context;
+    if (ctx.state === 'suspended') await ctx.resume();
+    _captureSource = ctx.createMediaStreamSource(stream);
+    _captureSource.connect(analyser.analyser);
+
+    _captureStream = stream;
+    // Auto-stop if the user clicks the browser's "Stop sharing" button
+    stream.getAudioTracks()[0].addEventListener('ended', _stopSystemCapture);
+
+    const btn = document.getElementById('capture-audio-btn');
+    if (btn) btn.textContent = 'Stop Capture';
+}
+
+document.getElementById('capture-audio-btn')?.addEventListener('click', () => {
+    if (_captureStream) _stopSystemCapture();
+    else _startSystemCapture();
+});
+
 document.getElementById('audio-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
+    _stopSystemCapture(); // file playback takes over
 
     const songName = await readID3Title({ file });
     const name = songName || file.name;
