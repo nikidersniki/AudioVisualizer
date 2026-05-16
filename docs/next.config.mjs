@@ -7,8 +7,8 @@ const config = {
     output: 'export',
     reactStrictMode: true,
     trailingSlash: true,
-    basePath: '/docs',
-    assetPrefix: '/docs',
+    basePath: '/AudioVisualizer/docs',
+    assetPrefix: '/AudioVisualizer/docs',
     images: { unoptimized: true },
 };
 

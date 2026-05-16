@@ -6,8 +6,13 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const docsOutDir = path.resolve(__dirname, 'docs/out');
 
+// Must match the GitHub Pages project path.
+// Local dev also uses this prefix so dev mirrors production.
+const BASE = '/AudioVisualizer/';
+const DOCS_MOUNT = BASE + 'docs';   // '/AudioVisualizer/docs'
+
 /**
- * Serve docs/out/ at /docs in both dev and prod.
+ * Serve docs/out/ at <DOCS_MOUNT> in dev, copy into dist/docs at build.
  * Requires `npm run docs:build` to have been run at least once.
  */
 function serveDocsPlugin() {
@@ -29,11 +34,7 @@ function serveDocsPlugin() {
     };
 
     function resolveDocFile(urlPath) {
-        // /docs            -> docs/out/index.html
-        // /docs/           -> docs/out/index.html
-        // /docs/intro      -> docs/out/intro/index.html (trailingSlash: true) or docs/out/intro.html
-        // /docs/_next/...  -> docs/out/_next/...
-        let rel = urlPath.replace(/^\/docs/, '');
+        let rel = urlPath.replace(new RegExp('^' + DOCS_MOUNT), '');
         if (rel === '' || rel === '/') return path.join(docsOutDir, 'index.html');
 
         let target = path.join(docsOutDir, rel);
@@ -56,7 +57,7 @@ function serveDocsPlugin() {
         name: 'serve-docs',
         configureServer(server) {
             server.middlewares.use((req, res, next) => {
-                if (!req.url?.startsWith('/docs')) return next();
+                if (!req.url?.startsWith(DOCS_MOUNT)) return next();
                 const pathname = req.url.split('?')[0];
                 const filePath = resolveDocFile(pathname);
                 if (!filePath) return next();
@@ -78,14 +79,27 @@ function serveDocsPlugin() {
     };
 }
 
+/** Drop a .nojekyll into dist/ so GitHub Pages stops mangling _next/ etc. */
+function nojekyllPlugin() {
+    return {
+        name: 'nojekyll',
+        apply: 'build',
+        closeBundle() {
+            const target = path.resolve(__dirname, 'dist/.nojekyll');
+            fs.writeFileSync(target, '');
+        },
+    };
+}
+
 export default defineConfig({
+    base: BASE,
     server: {
         port: 5173,
-        open: true,
+        open: BASE,
     },
     build: {
         outDir: 'dist',
         emptyOutDir: true,
     },
-    plugins: [serveDocsPlugin()],
+    plugins: [serveDocsPlugin(), nojekyllPlugin()],
 });
