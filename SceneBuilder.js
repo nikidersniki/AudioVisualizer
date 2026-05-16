@@ -7,18 +7,19 @@ import {
     CustomBlending, OneFactor, OneMinusSrcAlphaFactor,
     BufferGeometry, BufferAttribute, DoubleSide,
     EdgesGeometry,
-} from './modules/three.js/build/three.module.js';
+} from 'three';
 
-import { LineSegments2 }        from './modules/three.js/examples/jsm/lines/LineSegments2.js';
-import { LineSegmentsGeometry } from './modules/three.js/examples/jsm/lines/LineSegmentsGeometry.js';
-import { LineMaterial }         from './modules/three.js/examples/jsm/lines/LineMaterial.js';
+import { LineSegments2 }        from 'three/examples/jsm/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
+import { LineMaterial }         from 'three/examples/jsm/lines/LineMaterial.js';
 
-import { FBXLoader }     from './modules/three.js/examples/jsm/loaders/FBXLoader.js';
-import { OBJLoader }     from './modules/three.js/examples/jsm/loaders/OBJLoader.js';
-import { SimplexNoise }  from './modules/three.js/examples/jsm/math/SimplexNoise.js';
-import { EXRLoader }     from './modules/three.js/examples/jsm/loaders/EXRLoader.js';
-import { mergeVertices }      from './modules/three.js/examples/jsm/utils/BufferGeometryUtils.js';
-import { TransformControls }  from './modules/three.js/examples/jsm/controls/TransformControls.js';
+import { FBXLoader }     from 'three/examples/jsm/loaders/FBXLoader.js';
+import { OBJLoader }     from 'three/examples/jsm/loaders/OBJLoader.js';
+import { SimplexNoise }  from 'three/examples/jsm/math/SimplexNoise.js';
+import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
+import { EXRLoader }     from 'three/examples/jsm/loaders/EXRLoader.js';
+import { mergeVertices }      from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { TransformControls }  from 'three/examples/jsm/controls/TransformControls.js';
 
 import { Layer, ModelObject, PointLightObject, WaveObject, FillObject } from './Sceneobjects.js';
 // ─────────────────────────────────────────────
@@ -97,6 +98,7 @@ export class SceneBuilder {
         this._modelCache       = {};
         this._modelFBXTextures = {}; // name → { map, roughnessMap, metalnessMap, normalMap }
         this._simplex    = new SimplexNoise();
+        this._perlin     = new ImprovedNoise();
 
         // ── Layer list & per-layer scenes ─────────────
         this.layers       = [];               // Layer[]
@@ -216,42 +218,38 @@ export class SceneBuilder {
         if (!obj?.threeObject) return;
         this._transformControls.attach(obj.threeObject);
         this._gizmoChangeHandler = () => {
+            // Only commit values while the user is actually dragging the gizmo.
+            // Other internal updates (applyBindings writing mesh.scale every frame,
+            // audio-driven multipliers, etc.) also dispatch objectChange and must
+            // not be back-written or the value-feedback explodes.
+            if (!this._transformControls.dragging) return;
             const t = obj.threeObject;
             if (!t) return;
+            const ad = this.audioData;
             if (obj.posX.mode === 'constant') obj.posX.value = t.position.x;
             if (obj.posY.mode === 'constant') obj.posY.value = t.position.y;
             if (obj.posZ.mode === 'constant') obj.posZ.value = t.position.z;
             if (obj.rotX.mode === 'constant') obj.rotX.value = t.rotation.x;
             if (obj.rotY.mode === 'constant') obj.rotY.value = t.rotation.y;
             if (obj.rotZ.mode === 'constant') obj.rotZ.value = t.rotation.z;
-            // Reverse the scale factor so stored value matches what the binding expects.
-            if (obj.type === 'model') {
-                // model: mesh scale = scaleX * audioScale * 0.01
-                const as = obj.audioScale.mode === 'constant' ? obj.audioScale.value : 1;
-                const sf = as * 0.01;
-                if (obj.scaleX.mode === 'constant') obj.scaleX.value = t.scale.x / sf;
-                if (obj.scaleY.mode === 'constant') obj.scaleY.value = t.scale.y / sf;
-                if (obj.scaleZ.mode === 'constant') obj.scaleZ.value = t.scale.z / sf;
-            } else if (obj.type === 'image') {
-                // image: mesh scale = scaleX * audioScale
-                const as = obj.audioScale.mode === 'constant' ? obj.audioScale.value : 1;
-                if (obj.scaleX.mode === 'constant') obj.scaleX.value = t.scale.x / as;
-                if (obj.scaleY.mode === 'constant') obj.scaleY.value = t.scale.y / as;
-                if (obj.scaleZ.mode === 'constant') obj.scaleZ.value = t.scale.z / as;
-            } else {
-                if (obj.scaleX.mode === 'constant') obj.scaleX.value = t.scale.x;
-                if (obj.scaleY.mode === 'constant') obj.scaleY.value = t.scale.y;
-                if (obj.scaleZ.mode === 'constant') obj.scaleZ.value = t.scale.z;
-            }
+            // Inverse the LIVE per-frame multipliers (audioScale, globalScale, model 0.01)
+            // so the stored scaleX/Y/Z corresponds to the value the binding will produce.
+            const g  = obj.globalScale ? obj.globalScale.resolve(ad) : 1;
+            const as = obj.audioScale  ? obj.audioScale.resolve(ad)  : 1;
+            const k  = obj.type === 'model' ? 0.01 : 1;
+            const sf = g * as * k || 1;
+            if (obj.scaleX.mode === 'constant') obj.scaleX.value = t.scale.x / sf;
+            if (obj.scaleY.mode === 'constant') obj.scaleY.value = t.scale.y / sf;
+            if (obj.scaleZ.mode === 'constant') obj.scaleZ.value = t.scale.z / sf;
             onLiveUpdate?.();
             onChange?.();
         };
-        this._transformControls.addEventListener('change', this._gizmoChangeHandler);
+        this._transformControls.addEventListener('objectChange', this._gizmoChangeHandler);
     }
 
     detachGizmo() {
         if (this._gizmoChangeHandler) {
-            this._transformControls.removeEventListener('change', this._gizmoChangeHandler);
+            this._transformControls.removeEventListener('objectChange', this._gizmoChangeHandler);
             this._gizmoChangeHandler = null;
         }
         this._transformControls.detach();
@@ -703,6 +701,11 @@ export class SceneBuilder {
                     child.geometry.attributes.position.setUsage(DynamicDrawUsage);
                     object.originalPositions[child.uuid] =
                         child.geometry.attributes.position.array.slice();
+                    if (child.geometry.attributes.normal) {
+                        object.originalNormals ??= {};
+                        object.originalNormals[child.uuid] =
+                            child.geometry.attributes.normal.array.slice();
+                    }
                 }
             }
         });
@@ -891,28 +894,84 @@ export class SceneBuilder {
             );
         }
 
-        // ── Noise displacement ────────────────────────
+        // ── Displacement ──────────────────────────────
         const noiseScale  = modelObj.noiseScale.resolve(ad);
         const noiseAmount = modelObj.noiseAmount.resolve(ad);
         const avgFreq     = ad.avgFrequency;
+        const noiseType   = modelObj.noiseType ?? 'simplex';
+        const direction   = modelObj.displaceDirection ?? 'radial';
+
+        const sampleNoise = (x, y, z) => {
+            switch (noiseType) {
+                case 'perlin':
+                    return this._perlin.noise(
+                        x * noiseScale + time * 0.0006,
+                        y * noiseScale + avgFreq * 0.01,
+                        z * noiseScale + three.rotation.y
+                    );
+                case 'voronoi': {
+                    const sx = x * noiseScale + time * 0.0006;
+                    const sy = y * noiseScale + avgFreq * 0.01;
+                    const sz = z * noiseScale + three.rotation.y;
+                    const ix = Math.floor(sx), iy = Math.floor(sy), iz = Math.floor(sz);
+                    let minD = 1e9;
+                    for (let dz = -1; dz <= 1; dz++)
+                    for (let dy = -1; dy <= 1; dy++)
+                    for (let dx = -1; dx <= 1; dx++) {
+                        const cx = ix + dx, cy = iy + dy, cz = iz + dz;
+                        // hashed feature point in cell
+                        const h = Math.sin(cx * 127.1 + cy * 311.7 + cz * 74.7) * 43758.5453;
+                        const h2 = Math.sin(cx * 269.5 + cy * 183.3 + cz * 246.1) * 43758.5453;
+                        const h3 = Math.sin(cx * 113.5 + cy * 271.9 + cz * 124.6) * 43758.5453;
+                        const fx = cx + (h - Math.floor(h));
+                        const fy = cy + (h2 - Math.floor(h2));
+                        const fz = cz + (h3 - Math.floor(h3));
+                        const ddx = sx - fx, ddy = sy - fy, ddz = sz - fz;
+                        const d2 = ddx*ddx + ddy*ddy + ddz*ddz;
+                        if (d2 < minD) minD = d2;
+                    }
+                    return Math.sqrt(minD) * 2 - 1; // ~[-1,1]
+                }
+                case 'sine': {
+                    const k = noiseScale, tt = time * 0.001;
+                    return (
+                        Math.sin(x * k + tt) +
+                        Math.cos(y * k + tt * 1.3) +
+                        Math.sin(z * k + tt * 0.7)
+                    ) / 3;
+                }
+                case 'simplex':
+                default:
+                    return this._simplex.noise3d(
+                        x * noiseScale + time * 0.0006,
+                        y * noiseScale + avgFreq * 0.01,
+                        z * noiseScale + three.rotation.y
+                    );
+            }
+        };
 
         three.traverse(child => {
             if (!child.isMesh || !child.geometry || !three.originalPositions?.[child.uuid]) return;
             const positions = child.geometry.attributes.position;
             const original  = three.originalPositions[child.uuid];
+            const normals   = direction === 'normal'
+                ? three.originalNormals?.[child.uuid]
+                : null;
 
             for (let i = 0; i < original.length; i += 3) {
                 const x = original[i], y = original[i+1], z = original[i+2];
-                const noise = this._simplex.noise3d(
-                    x * noiseScale + time * 0.0006,
-                    y * noiseScale + avgFreq * 0.01,
-                    z * noiseScale + three.rotation.y
-                );
-                const len = Math.sqrt(x*x + y*y + z*z) || 1;
+                const noise = sampleNoise(x, y, z);
                 const d   = noise * avgFreq * 0.001 * noiseAmount;
-                positions.array[i]     = x + (x/len)*d;
-                positions.array[i + 1] = y + (y/len)*d;
-                positions.array[i + 2] = z + (z/len)*d;
+                let dx, dy, dz;
+                if (normals) {
+                    dx = normals[i]; dy = normals[i+1]; dz = normals[i+2];
+                } else {
+                    const len = Math.sqrt(x*x + y*y + z*z) || 1;
+                    dx = x/len; dy = y/len; dz = z/len;
+                }
+                positions.array[i]     = x + dx*d;
+                positions.array[i + 1] = y + dy*d;
+                positions.array[i + 2] = z + dz*d;
             }
             positions.needsUpdate = true;
             child.geometry.computeVertexNormals();
@@ -1141,25 +1200,23 @@ export class SceneBuilder {
         return this.layers.map(l => l.toJSON());
     }
 
-    loadFromJSON(data) {
-        // Remove all existing scene objects from their layer scenes
-        this.layers.forEach(l => {
-            const scene = this._layerScenes.get(l.id);
-            l.objects.forEach(o => { if (o.threeObject && scene) scene.remove(o.threeObject); });
-            this._layerTargets.get(l.id)?.dispose();
-        });
-        this._layerScenes.clear();
-        this._layerTargets.clear();
-        this._layerPPPipelines.clear();
-        this.layers = [];
+    async loadFromJSON(data) {
+        // Detach gizmo so it doesn't keep referencing an about-to-be-removed mesh
+        this.detachGizmo();
 
-        const promises = [];
+        // Build the new layers + scenes in TEMPORARY maps first, so the renderer
+        // keeps drawing the existing scene until the new content is fully loaded.
+        const newLayers  = [];
+        const newScenes  = new Map();
+        const newTargets = new Map();
+        const promises   = [];
+
         for (const layerData of data) {
             const layer = Layer.fromJSON(layerData);
-            this.layers.push(layer);
+            newLayers.push(layer);
             const scene = new Scene();
-            this._layerScenes.set(layer.id, scene);
-            this._layerTargets.set(layer.id, new WebGLRenderTarget(this.width, this.height));
+            newScenes.set(layer.id, scene);
+            newTargets.set(layer.id, new WebGLRenderTarget(this.width, this.height));
             for (const obj of layer.objects) {
                 if (obj.type === 'model') {
                     promises.push(this._loadMesh(obj, scene));
@@ -1178,6 +1235,26 @@ export class SceneBuilder {
                 }
             }
         }
-        return Promise.all(promises);
+
+        await Promise.all(promises);
+
+        // Atomic swap: dispose old, install new
+        const oldLayers  = this.layers;
+        const oldScenes  = this._layerScenes;
+        const oldTargets = this._layerTargets;
+
+        this.layers          = newLayers;
+        this._layerScenes    = newScenes;
+        this._layerTargets   = newTargets;
+        this._layerPPPipelines.clear();
+
+        oldLayers.forEach(l => {
+            const scene = oldScenes.get(l.id);
+            l.objects.forEach(o => {
+                if (o.threeObject && scene) scene.remove(o.threeObject);
+                o.threeObject = null;
+            });
+            oldTargets.get(l.id)?.dispose();
+        });
     }
 }

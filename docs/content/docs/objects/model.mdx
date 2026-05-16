@@ -1,0 +1,32 @@
+---
+title: Model
+description: 3D mesh from the catalogue with material, spin, and displacement.
+---
+
+A 3D mesh loaded from FBX/OBJ. The base mesh comes from the model catalogue (cube, sphere, duck, etc.).
+
+## Properties
+
+| Section | Controls |
+|---|---|
+| General | Name, visibility |
+| Model | Pick from the catalogue |
+| Material Properties | See below |
+| Position / Rotation / Scale | Each axis is a [PropertyBinding](/docs/bindings) |
+| Audio Scale | Extra scale multiplier driven by audio |
+| Spin | Continuous rotation. Axis + speed binding |
+| Displacement | Per-vertex noise displacement. See [Displacement](/docs/displacement) |
+
+## Material types
+
+- **normal** — Three.js `MeshNormalMaterial`. Shows surface normals as RGB. No lighting setup needed.
+- **wireframe** — Edges only, with configurable screen-space line width.
+- **standard** — PBR with HDRI reflections. Affected by point lights. Supports FBX-bundled textures (`map`, `roughnessMap`, `metalnessMap`, `normalMap`), each independently toggleable.
+
+## Color reactive
+
+When enabled, the material color cycles its hue based on `avgFrequency * colorSensitivity`. Quick way to make a model rainbow on the beat without setting up a binding chain.
+
+## Smooth shading
+
+`mergeVertices` is run on the geometry at load, so `computeVertexNormals` produces smooth shading by default. Toggle **Smooth Shading** off for faceted / low-poly look.

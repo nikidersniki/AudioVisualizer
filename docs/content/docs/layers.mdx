@@ -1,0 +1,21 @@
+---
+title: Layers
+description: Independent 3D scenes that composite together.
+---
+
+Scenes are organized into layers. Each layer:
+
+- Has its own 3D scene and render target.
+- Can be hidden, soloed, reordered, or have its opacity changed.
+- Holds any number of objects (models, waves, lights, images).
+- Can carry its own post-processing pipeline that runs **before** compositing.
+
+The first layer is the **Base** layer — it cannot be removed and always renders behind the others.
+
+## Compositing order
+
+Layers are stacked top → bottom. Each layer's render target is composited onto the accumulating result, then [Global Post-Processing](/docs/post-processing) runs on the final image.
+
+## Per-layer PP context
+
+Switch to a layer in the **PP** tab to edit *that layer's* pipeline. Switch to **Global** to edit the final-image pipeline.

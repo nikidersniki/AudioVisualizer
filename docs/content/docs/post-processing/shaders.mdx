@@ -1,0 +1,24 @@
+---
+title: Shader Passes
+description: Custom GLSL effect library.
+---
+
+Each pass is a fragment shader operating on the previous step's output. Cheap to stack many.
+
+| Shader | Effect |
+|---|---|
+| **Sketch** | Hand-drawn line look. Pen pressure / hatch density controls. |
+| **ASCII** | Brightness → ASCII glyphs. Cell size + glyph ramp. |
+| **Mirror** | Kaleidoscopic mirror. Configurable slice count. |
+| **Sharpen** | Unsharp mask. |
+| **Outline** | Edge-detect outline overlay. Threshold + color. |
+| **Water Paint** | Watercolor smear. Spread + sample radius. |
+| **Color Blocks** | Quantize to flat color regions. Block count controls. |
+| **Pixless Dither** | Ordered-dither pixelation. |
+| **Sine Thresholder** | Animated sine threshold per pixel. |
+| **Hue / Saturation / Color** | HSV grading. Each channel a binding. |
+| **Color Ramp** | Map luminance through a custom gradient. |
+| **Blur** | Gaussian blur. Configurable radius. |
+| **Dot Screen** | Halftone dots. Scale + angle. |
+
+All shader-pass parameters can be bound to audio, so you can pulse the outline thickness on a beat or wobble the dot-screen scale with `bass`.

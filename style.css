@@ -368,13 +368,13 @@ header .h2 {
 .anim-property-block {
     display: flex;
     flex-direction: column;
-    padding: 0 0 6px;
+    padding: 0px;
 }
 .anim-property-head {
     display: flex;
     align-items: center;
     gap: 6px;
-    margin-top: 8px;
+    margin-top: 2px;
     padding: 3px 8px;
     background: var(--accent-glow);
     border-left: 2px solid var(--accent);
@@ -975,7 +975,7 @@ header .h2 {
    ════════════════════════════════════════════════════════════════ */
 .Btn {
     font-family: var(--font-mono);
-    font-size: 0.65rem;
+    font-size: 0.7rem;
     font-weight: 700;
     letter-spacing: 0.07em;
     text-transform: uppercase;
@@ -986,6 +986,13 @@ header .h2 {
     padding: 3px 10px;
     cursor: pointer;
     transition: background 0.12s, color 0.12s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    height: 22px;
+    box-sizing: border-box;
 }
 .Btn:hover {
     background: var(--accent);
@@ -1123,6 +1130,32 @@ header .h2 {
     filter: none;
     color: var(--text);
 }
+.popup-button-box .big-Btn:only-child {
+    width: 100%;
+    border-right: none;
+    background: var(--accent);
+    color: var(--bg);
+}
+.popup-button-box .big-Btn:only-child:hover {
+    background: var(--accent);
+    color: var(--bg);
+    filter: brightness(1.15);
+}
+
+/* Generic popup body wrapper (for popups without form inputs) */
+.popup-body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.6;
+    color: var(--text);
+}
+.popup-body p { margin: 0 0 10px; }
+.popup-body p:last-child { margin-bottom: 0; }
+.popup-body .muted { color: var(--text-dim); }
+.popup-body .small { font-size: 0.7rem; }
+.popup-body strong { color: var(--accent); font-weight: 700; }
 
 /* ════════════════════════════════════════════════════════════════
    OBJECT LIST + PROPERTIES
@@ -1801,9 +1834,10 @@ main { display: none; }
 }
 
 /* Windows dropdown */
-.Btn-dropdown { position: relative; }
+.Btn-dropdown { position: relative; display: inline-flex; }
 #windows-menu-list,
-#layout-menu-list {
+#layout-menu-list,
+#file-menu-list {
     display: none;
     position: absolute;
     top: 100%; left: 0;
@@ -1816,7 +1850,8 @@ main { display: none; }
     font-size: 12px;
 }
 #windows-menu-list.open,
-#layout-menu-list.open { display: block; }
+#layout-menu-list.open,
+#file-menu-list.open { display: block; }
 .windows-menu-item {
     padding: 6px 12px;
     color: var(--text);

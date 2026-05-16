@@ -125,7 +125,9 @@ export class ModelObject extends SceneObject {
         this.useMetalnessMapTexture = true;
         this.useNormalMapTexture    = true;
 
-        // Noise displacement
+        // Displacement
+        this.noiseType    = 'simplex'; // 'simplex' | 'perlin' | 'voronoi' | 'sine'
+        this.displaceDirection = 'radial'; // 'radial' | 'normal'
         this.noiseScale   = new PropertyBinding(1);
         this.noiseAmount  = new PropertyBinding(1);
 

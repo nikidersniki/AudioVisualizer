@@ -1,0 +1,116 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+@source '../node_modules/fumadocs-ui/dist/**/*.js';
+
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=VT323&display=swap');
+
+/* ── Revisualize 3D — Terminal-Noir palette ──────────────────────
+   Override Fumadocs theme vars. These selectors come AFTER the
+   imported `.dark { ... }` block from default-colors.css, so they
+   win at runtime. Targeted with html.dark for high specificity.    */
+html,
+html.dark,
+:root,
+.dark {
+    --color-fd-background:           #080808 !important;
+    --color-fd-foreground:           rgba(255, 255, 255, 0.88) !important;
+    --color-fd-muted:                #141414 !important;
+    --color-fd-muted-foreground:     rgba(255, 255, 255, 0.534) !important;
+    --color-fd-popover:              #0d0d0d !important;
+    --color-fd-popover-foreground:   rgba(255, 255, 255, 0.88) !important;
+    --color-fd-card:                 #0d0d0d !important;
+    --color-fd-card-foreground:      rgba(255, 255, 255, 0.88) !important;
+    --color-fd-border:               rgba(255, 255, 255, 0.12) !important;
+    --color-fd-primary:              #c8f035 !important;
+    --color-fd-primary-foreground:   #080808 !important;
+    --color-fd-secondary:            #141414 !important;
+    --color-fd-secondary-foreground: rgba(255, 255, 255, 0.88) !important;
+    --color-fd-accent:               rgba(200, 240, 53, 0.15) !important;
+    --color-fd-accent-foreground:    #c8f035 !important;
+    --color-fd-ring:                 rgba(200, 240, 53, 0.5) !important;
+    --color-fd-overlay:              rgba(0, 0, 0, 0.6) !important;
+}
+
+.dark #nd-sidebar {
+    --color-fd-muted: #141414 !important;
+    --color-fd-secondary: #1e1e1e !important;
+    --color-fd-muted-foreground: rgba(255, 255, 255, 0.76) !important;
+}
+
+/* ── Typography ─────────────────────────────────────────────────── */
+html,
+body {
+    background: var(--bg);
+    background-image: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(255,255,255,0.012) 2px,
+        rgba(255,255,255,0.012) 4px
+    );
+    color: rgba(255, 255, 255, 0.88);
+    font-family: 'Space Mono', 'Courier New', monospace;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: 'VT323', 'Space Mono', monospace;
+    color: #c8f035;
+    letter-spacing: 0.02em;
+}
+
+h1 { font-size: 2.4rem; }
+h2 { font-size: 1.8rem; }
+h3 { font-size: 1.4rem; }
+
+code, kbd, pre, .font-mono {
+    font-family: 'Space Mono', 'Courier New', monospace !important;
+}
+
+/* Inline code blocks pick up accent */
+:not(pre) > code {
+    color: #c8f035;
+    background: rgba(200, 240, 53, 0.08);
+    border: 1px solid rgba(200, 240, 53, 0.2);
+    padding: 1px 6px;
+    border-radius: 2px;
+}
+
+/* Tables */
+table th {
+    color: #c8f035;
+    text-transform: uppercase;
+    font-size: 0.78rem;
+    letter-spacing: 0.07em;
+}
+table td, table th {
+    border-color: rgba(255, 255, 255, 0.12) !important;
+}
+
+/* Prose links — but NOT button-style links (those bring their own color via Tailwind utility) */
+.prose a:not([class*="bg-"]) {
+    color: #c8f035;
+    text-decoration: none;
+}
+.prose a:not([class*="bg-"]):hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+/* Scrollbars match main app */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(200, 240, 53, 0.35) transparent;
+}
+*::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+    background: rgba(200, 240, 53, 0.35);
+    border-radius: 0;
+}
+*::-webkit-scrollbar-thumb:hover {
+    background: rgba(200, 240, 53, 0.6);
+}

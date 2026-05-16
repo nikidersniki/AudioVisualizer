@@ -1,0 +1,27 @@
+---
+title: Property Bindings
+description: How audio-driven properties work.
+---
+
+Almost every numeric value in the app is a **PropertyBinding** with two modes:
+
+- **constant** — A fixed number. Edit it inline.
+- **audio** — Driven by an audio signal. Configure source, range, and curve.
+
+## Audio mode parameters
+
+| Field | Meaning |
+|---|---|
+| `source` | Which audio signal to read. See [Audio Sources](/docs/audio-sources). |
+| `min` / `max` | Remap range. The 0–255 signal becomes `min..max`. |
+| `curve` | `linear` (default), `exponential` (t²), or `inverse` (1 − t). |
+
+## Example
+
+A binding with `source=beat, min=10, max=20` outputs `10` at silence and `20` at peak beat.
+
+Set `curve=exponential` to make the rise non-linear (small values stay small, big values explode). Set `curve=inverse` to flip — value is *high* when the source is *low*.
+
+## Tip — taming twitchy sources
+
+Sources like `flux` and `beat` are spiky. If a property looks too noisy, switch the binding to a smoother source (`volumeSlow`, `avgSlow`, `bass`) or shrink the `min..max` range.

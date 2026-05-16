@@ -1,11 +1,13 @@
 import {
     AudioListener, Audio, AudioAnalyser,
-} from './modules/three.js/build/three.module.js';
+} from 'three';
 
 import { SceneBuilder, PRESETS}    from './SceneBuilder.js';
 import { Layer, ModelObject, PointLightObject, WaveObject, FillObject, PropertyBinding} from './Sceneobjects.js';
 import { PP_SHADER_REGISTRY, PP_NATIVE_REGISTRY, PostProcessingLayer, PostProcessingPipeline, NativePassLayer, initShaders } from './PostProcessing.js';
 import {generateMaterialPreviews, generateModelPreviews, generatePPPreviews} from './PreviewRenderer.js';
+import { readID3Title } from './SoundNameReader.js';
+import './mobile-ui.js';
 
 // ─────────────────────────────────────────────
 //  Global Range Input Decorator
@@ -223,6 +225,11 @@ async function deserializeAll(data) {
         if (id !== 'global') ppContexts.delete(id);
     }
 
+    // Reset selection / property panel — old object refs are about to be invalidated
+    selectedObject = null;
+    const propPanel = document.getElementById('object-properties');
+    if (propPanel) propPanel.innerHTML = '';
+
     // Restore custom catalogues BEFORE loadFromJSON so FillObjects can resolve
     // their image references and HDRI lookups work on first frame
     if (globalEntry?.customCatalogues) {
@@ -264,10 +271,10 @@ async function deserializeAll(data) {
         window.applyGLLayout(globalEntry.glLayout);
     }
 
-    // Restore global PP
+    // Restore global PP (always reset, even if loaded project has none)
     const globalCtx = ppContexts.get('global');
-    if (globalCtx && globalEntry?.ppLayers?.length) {
-        globalCtx.layers = globalEntry.ppLayers.map(_deserializePPLayer);
+    if (globalCtx) {
+        globalCtx.layers = (globalEntry?.ppLayers ?? []).map(_deserializePPLayer);
         globalCtx.pipeline.layers = globalCtx.layers;
     }
 
@@ -504,7 +511,9 @@ function renderAnimationList() {
         } else {
             const found = findObjectById(objectId);
             if (!found) continue;
-            displayName = found.obj.name || found.obj.type;
+            const objName   = found.obj.name || found.obj.type;
+            const layerName = found.layer?.name ?? '';
+            displayName = layerName ? `${layerName}: ${objName}` : objName;
             getBinding = (key) => found.obj[key];
         }
 
@@ -628,6 +637,65 @@ function downloadLayersToFile(Name) {
 
 
 let currentProjectName = '';
+
+// File menu dropdown toggle
+(() => {
+    const btn  = document.getElementById('file-menu-btn');
+    const list = document.getElementById('file-menu-list');
+    if (!btn || !list) return;
+    btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        list.classList.toggle('open');
+    });
+    document.addEventListener('click', () => list.classList.remove('open'));
+})();
+
+// About popup
+(() => {
+    const btn = document.getElementById('about-btn');
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+        const bg = document.createElement('div');
+        bg.className = 'popup-bg';
+        const popup = document.createElement('div');
+        popup.className = 'popup';
+
+        const title = document.createElement('div');
+        title.className = 'h1 popup-title-text';
+        title.textContent = 'Revisualize 3D';
+
+        const body = document.createElement('div');
+        body.className = 'popup-body';
+        body.innerHTML = `
+            <p>
+                A browser-based real-time 3D audio visualizer.
+                Build scenes from models, waves, lights, and images.
+                Drive any numeric property from the live audio spectrum.
+                Stack shader and native post-processing effects per-layer or globally.
+            </p>
+            <p class="muted">Built on Three.js with Golden Layout panels.</p>
+            <p class="muted small">Version 0.1 · Open the <strong>Help</strong> button for full documentation.</p>
+        `;
+
+        const ok = document.createElement('div');
+        ok.className = 'big-Btn';
+        ok.textContent = 'Close';
+
+        const buttonBox = document.createElement('div');
+        buttonBox.className = 'popup-button-box';
+        buttonBox.appendChild(ok);
+
+        popup.appendChild(title);
+        popup.appendChild(body);
+        popup.appendChild(buttonBox);
+        bg.appendChild(popup);
+
+        const close = () => bg.remove();
+        ok.addEventListener('click', close);
+        bg.addEventListener('click', (e) => { if (e.target === bg) close(); });
+        document.body.appendChild(bg);
+    });
+})();
 
 document.getElementById('file-save').addEventListener('click', ()=>{
     spawnPopup("Save Project", [['Name','text', false, currentProjectName]])
@@ -2239,7 +2307,17 @@ function renderObjectProperties(obj, layer) {
             v => { obj.spinAxis = v; }
         );
 
-        section('Noise');
+        section('Displacement');
+        selectInput('Type',
+            ['simplex', 'perlin', 'voronoi', 'sine'],
+            () => obj.noiseType ?? 'simplex',
+            v => { obj.noiseType = v; }
+        );
+        selectInput('Direction',
+            ['radial', 'normal'],
+            () => obj.displaceDirection ?? 'radial',
+            v => { obj.displaceDirection = v; }
+        );
         bindingPanel('Noise Scale', obj.noiseScale);
         bindingPanel('Noise Amount', obj.noiseAmount);
     }

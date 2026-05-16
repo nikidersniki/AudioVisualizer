@@ -1,0 +1,14 @@
+---
+title: Native Passes
+description: Built-in Three.js post-processing.
+---
+
+These passes use Three.js's `postprocessing` library rather than custom shaders. They're typically more expensive than shader passes but produce well-tuned effects out of the box.
+
+| Pass | Purpose |
+|---|---|
+| **Bloom (Unreal)** | HDR bloom. Threshold, strength, radius. Looks great with `strength` bound to `bass` or `beat`. |
+| **Afterimage** | Per-frame trail / motion smear. Damp controls fade rate. |
+| **Film Grain** | Noise, scanlines, grayscale toggle. Cheap analog feel. |
+| **Glitch** | Periodic RGB shift glitch. Random by default. |
+| **Output (Tone Map)** | Tone-mapping & exposure for HDR-aware shaders. Place last in the chain. |

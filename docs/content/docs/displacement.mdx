@@ -1,0 +1,39 @@
+---
+title: Displacement
+description: Per-vertex noise displacement for models.
+---
+
+Per-vertex displacement scaled by `avgFrequency`. Two selectors plus two bindings.
+
+## Type
+
+| Type | Look |
+|---|---|
+| `simplex` | Smooth organic blobs. Default. |
+| `perlin` | Classic Perlin. Slight grid bias, softer than simplex. |
+| `voronoi` | Cellular / cracked-mud look. F1 distance to feature points. |
+| `sine` | Predictable ripples: `(sin(xk+t) + cos(yk+t) + sin(zk+t)) / 3`. |
+
+## Direction
+
+| Direction | Effect |
+|---|---|
+| `radial` | Push along the ray from the model origin. Closed centered shapes balloon evenly. |
+| `normal` | Push along the surface normal. Works on flat or off-center geometry. |
+
+## Parameters
+
+- **Noise Scale** — frequency of the noise pattern. Higher = finer detail.
+- **Noise Amount** — overall displacement magnitude.
+
+Both are bindings, so the displacement can pulse or warp with the music.
+
+## Performance
+
+Voronoi loops 27 cells per vertex — heavy on dense meshes. If laggy:
+
+- Lower the displacement amount on high-poly models.
+- Swap to `simplex` or `perlin`.
+- Reduce model complexity.
+
+Displacement runs on the CPU each frame — for very dense geometry consider a wireframe material to skip lighting cost.

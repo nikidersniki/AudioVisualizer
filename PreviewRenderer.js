@@ -3,13 +3,13 @@ import {
     IcosahedronGeometry, Mesh, Box3, Vector3,
     MeshNormalMaterial, PointLight,
     WebGLRenderTarget, PlaneGeometry, OrthographicCamera, ShaderMaterial,
-} from './modules/three.js/build/three.module.js';
+} from 'three';
 
 import { PP_SHADER_REGISTRY, PP_NATIVE_REGISTRY } from './PostProcessing.js';
 
-import { FBXLoader } from './modules/three.js/examples/jsm/loaders/FBXLoader.js';
-import { OBJLoader } from './modules/three.js/examples/jsm/loaders/OBJLoader.js';
-import { mergeVertices } from './modules/three.js/examples/jsm/utils/BufferGeometryUtils.js';
+import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader.js';
+import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
+import { mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 import { PRESETS } from './SceneBuilder.js';
 

@@ -1,0 +1,53 @@
+---
+title: Audio Sources
+description: All signals available to drive bindings.
+---
+
+All sources are normalized to 0–255 so they can be combined and remapped uniformly.
+
+## Frequency bands
+
+| Source | Range | Character |
+|---|---|---|
+| `sub` | 20–60 Hz | Sub-bass. Felt more than heard — kick drums, drops. |
+| `bass` | 60–250 Hz | Kicks, bass-guitar fundamentals. |
+| `lowMid` | 250–500 Hz | Body of instruments and vocals. |
+| `mid` | 500–2000 Hz | Where most musical content sits. |
+| `highMid` | 2–4 kHz | Vocal presence, percussion attack. |
+| `presence` | 4–6 kHz | Clarity, snare crack. |
+| `brilliance` | 6+ kHz | Cymbals, sibilance, air. |
+
+## Spectral features
+
+| Source | Meaning |
+|---|---|
+| `rms` | True loudness from the raw waveform. Smoother than spectral averages. |
+| `centroid` | Spectral brightness. High = treble-heavy sound. |
+| `flatness` | Tonal vs noisy. Low = pure tone, high = noise (cymbals, hiss). |
+| `flux` | Total spectral change between frames. Transient spikes. |
+| `zcr` | Zero-crossing rate. Cheap pitch / noisiness proxy. |
+| `peak` | Loudest single FFT bin this frame. |
+
+## Rhythm
+
+| Source | Meaning |
+|---|---|
+| `beat` | Pulses to max on detected beats, decays. Best for rhythmic motion. |
+| `bpm` | Estimated tempo (40–240 BPM). Use min/max to remap to a useful range. |
+
+## Smoothed envelopes
+
+| Source | Meaning |
+|---|---|
+| `volumeFast` / `volumeSlow` | Master volume with fast / slow attack. |
+| `avgFast` / `avgSlow` | Average frequency with fast / slow attack. |
+
+## Classic 3-band split
+
+| Source | Range |
+|---|---|
+| `lowFreq` | Lower third of the FFT |
+| `midFreq` | Middle third |
+| `highFreq` | Upper third |
+
+Kept for compatibility — prefer the named bands above for new work.

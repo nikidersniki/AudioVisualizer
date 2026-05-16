@@ -1,4 +1,4 @@
-function readID3Title(storedRecord) {
+export function readID3Title(storedRecord) {
     return new Promise((resolve) => {
         const file = storedRecord.file;
 

@@ -1,0 +1,17 @@
+{
+    "title": "Documentation",
+    "pages": [
+        "index",
+        "getting-started",
+        "interface",
+        "layers",
+        "objects",
+        "bindings",
+        "audio-sources",
+        "displacement",
+        "post-processing",
+        "animation",
+        "projects",
+        "shortcuts"
+    ]
+}

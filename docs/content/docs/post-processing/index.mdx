@@ -1,0 +1,22 @@
+---
+title: Post-Processing
+description: Two pipelines — global and per-layer.
+---
+
+Two contexts, switched from the PP tab:
+
+- **Global** — runs on the final composited image.
+- **Layer** — runs on a single layer **before** it's composited.
+
+Each context is a stack of layers, evaluated top → bottom. Layers can be:
+
+- [Native passes](/docs/post-processing/native) — built-in Three.js effects (bloom, glitch, …).
+- [Shader passes](/docs/post-processing/shaders) — custom GLSL effects.
+
+Every pass parameter can be bound to audio — same UI as object properties.
+
+## Ordering tips
+
+- Put **Bloom** near the top so later effects see the bloomed image.
+- Put **Output (Tone Map)** last for HDR-aware shader chains.
+- Stacking shader passes is cheap — fragment shaders only.

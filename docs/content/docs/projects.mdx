@@ -1,0 +1,26 @@
+---
+title: Projects
+description: How project files are structured and persisted.
+---
+
+A project file is a single JSON containing:
+
+- All layers and their objects, with every binding preserved.
+- Global and per-layer post-processing stacks.
+- Scene settings: HDRI, background color, master volume.
+- Custom catalogues (embedded media as data URLs — projects are fully self-contained).
+- The Golden Layout pane arrangement.
+- The animated-properties list.
+
+## Auto-save
+
+The current project auto-saves to IndexedDB between sessions. Reload the page and the last state restores.
+
+## Manual save / load
+
+- **Save Project** — exports the current state to disk as `{name}.json`.
+- **Open Project** — imports from disk. Replaces the current state cleanly (gizmo detached, selection cleared, old PP wiped before new state loads).
+
+## Resources are embedded
+
+When you **Add Resources**, the files are stored as data URLs inside the project. This means project files are larger than just the scene description, but they're fully portable — share one JSON and the recipient gets the textures and videos too.

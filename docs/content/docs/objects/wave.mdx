@@ -1,0 +1,29 @@
+---
+title: Wave
+description: Frequency-spectrum visualisations in 6 styles.
+---
+
+A frequency-spectrum line / bar visualizer. Pick a `Type`:
+
+| Type | Shape |
+|---|---|
+| `circular` | Ring whose radius modulates with each frequency bin |
+| `linear` | Horizontal waveform, bars going up and down from center |
+| `linear-up` | Same but mirrored — bars only go up |
+| `bars` | Discrete vertical bars per bin |
+| `bars-both` | Bars extending up and down from center |
+| `line` | Smooth raw-time waveform from `timeData` |
+
+## Common controls
+
+- **Line color** + optional **fill color** with fill toggle (where supported by the type).
+- **Line width** — screen-space pixels.
+- **Amplitude** (binding) — height multiplier.
+- **Radius** (binding) — base radius for `circular`.
+- **Width** (binding) — horizontal span for `linear` / `line`.
+- **Bar spacing** (binding) — distance between bars for `bars` / `bars-both`.
+
+## Tips
+
+- `line` reads the raw time-domain buffer rather than FFT bins — best for oscilloscope-style waveform shapes.
+- `circular` looks great with `amplitude` bound to `bass` and a big `radius` value.

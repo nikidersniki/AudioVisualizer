@@ -3,15 +3,15 @@ import {
     Scene, OrthographicCamera, Vector2, Vector4,
     TextureLoader, RepeatWrapping, Color,
     CanvasTexture, ClampToEdgeWrapping, NearestFilter,
-} from './modules/three.js/build/three.module.js';
+} from 'three';
 
 import { PropertyBinding } from './Sceneobjects.js';
 
-import { UnrealBloomPass } from './modules/three.js/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { AfterimagePass }  from './modules/three.js/examples/jsm/postprocessing/AfterimagePass.js';
-import { FilmPass }        from './modules/three.js/examples/jsm/postprocessing/FilmPass.js';
-import { GlitchPass }      from './modules/three.js/examples/jsm/postprocessing/GlitchPass.js';
-import { OutputPass }      from './modules/three.js/examples/jsm/postprocessing/OutputPass.js';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { AfterimagePass }  from 'three/examples/jsm/postprocessing/AfterimagePass.js';
+import { FilmPass }        from 'three/examples/jsm/postprocessing/FilmPass.js';
+import { GlitchPass }      from 'three/examples/jsm/postprocessing/GlitchPass.js';
+import { OutputPass }      from 'three/examples/jsm/postprocessing/OutputPass.js';
 
 // ── Noise texture (loaded once) ───────────────────────────────
 let _noiseTex = null;

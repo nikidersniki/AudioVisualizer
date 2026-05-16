@@ -1,0 +1,30 @@
+---
+title: Interface
+description: Header menus, gizmo, and panel system.
+---
+
+## File menu
+
+| Item | What it does |
+|---|---|
+| New Project | Discards current scene. Prompts to save first. Creates an empty base layer. |
+| Open Project | Loads a `.json` project from disk. |
+| Save Project | Downloads the scene as `{name}.json`. |
+| Add Resources | Import images, videos, or audio. Embedded as data URLs. |
+
+## Windows / Layout menus
+
+- **Windows ▾** — toggle individual panels (Viewport, Layers, Properties, Animation, Audio Monitor).
+- **Layout ▾** — reset the panel layout. Drag any tab to dock it as a new pane (powered by Golden Layout).
+
+## Gizmo
+
+When a 3D object is selected, the transform gizmo appears in the viewport. Switch modes from the top-center pill or with the keyboard.
+
+| Mode | Key |
+|---|---|
+| Move | `T` |
+| Rotate | `R` |
+| Scale | `S` |
+
+Dragging the gizmo writes back into the object's `posX/Y/Z`, `rotX/Y/Z`, or `scaleX/Y/Z` bindings — but only if those bindings are in `constant` mode. Audio-driven bindings ignore drag input (otherwise the live multiplier would fight the gizmo).

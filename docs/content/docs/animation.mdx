@@ -1,0 +1,21 @@
+---
+title: Animation
+description: Keyframe-style automation for properties.
+---
+
+The **Animation** tab tracks specific properties for keyframe-style automation. Add a property to the list, then animate its value over time independently of audio reactivity.
+
+Works on object properties and post-processing pass parameters.
+
+## When to use it
+
+Use animation for things audio reactivity can't naturally do:
+
+- Slow camera drifts.
+- Pre-timed material switches synced to song sections.
+- Scripted intros / outros.
+- Smooth transitions between parameter states.
+
+## Combining with audio
+
+Both systems can drive the same property — animation provides the "score", audio provides the "performance". The animated value usually feeds the binding's `min..max` range or replaces the constant value.

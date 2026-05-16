@@ -1,0 +1,19 @@
+{
+    "name": "revisualize-3d",
+    "version": "0.1.0",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "dev": "vite",
+        "build": "npm run docs:build && vite build",
+        "preview": "vite preview",
+        "docs:dev": "npm run dev --prefix docs",
+        "docs:build": "npm run build --prefix docs"
+    },
+    "dependencies": {
+        "three": "^0.184.0"
+    },
+    "devDependencies": {
+        "vite": "^7.0.0"
+    }
+}
