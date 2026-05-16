@@ -656,27 +656,22 @@ export class SceneBuilder {
         const entry = this._getCatalogue(modelObj.modelName);
         if (!entry) { console.warn('Unknown model:', modelObj.modelName); return; }
 
-        // Re-use cached geometry clone if available
-        if (this._modelCache[modelObj.modelName]) {
-            const cached = this._modelCache[modelObj.modelName];
-            const clone  = cached.clone();
-            this._prepareObject(clone, modelObj, entry);
-            modelObj.threeObject = clone;
-            scene?.add(clone);
-            return;
+        // Load raw FBX into cache if missing. The cached object is NEVER used as a
+        // live scene instance — it must stay untouched so subsequent clones get
+        // pristine geometry (displacement mutates positions per-frame in place).
+        let raw = this._modelCache[modelObj.modelName];
+        if (!raw) {
+            raw = await new Promise((resolve, reject) => {
+                this._getLoader(entry.path).load(entry.path, resolve, undefined, reject);
+            });
+            this._modelFBXTextures[modelObj.modelName] = this._extractFBXTextures(raw);
+            this._modelCache[modelObj.modelName] = raw;
         }
 
-        return new Promise((resolve, reject) => {
-            this._getLoader(entry.path).load(entry.path, (object) => {
-                // Extract FBX textures while original materials are still intact
-                this._modelFBXTextures[modelObj.modelName] = this._extractFBXTextures(object);
-                this._modelCache[modelObj.modelName] = object;
-                this._prepareObject(object, modelObj, entry);
-                modelObj.threeObject = object;
-                scene?.add(object);
-                resolve(object);
-            }, undefined, reject);
-        });
+        const instance = raw.clone();
+        this._prepareObject(instance, modelObj, entry);
+        modelObj.threeObject = instance;
+        scene?.add(instance);
     }
 
     _prepareObject(object, modelObj, entry) {
