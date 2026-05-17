@@ -9,8 +9,15 @@ description: Header menus, gizmo, and panel system.
 |---|---|
 | New Project | Discards current scene. Prompts to save first. Creates an empty base layer. |
 | Open Project | Loads a `.json` project from disk. |
+| Load Preset… | Opens the preset picker. Shows live thumbnails of every bundled preset; click one to load. |
 | Save Project | Downloads the scene as `{name}.json`. |
-| Add Resources | Import images, videos, or audio. Embedded as data URLs. |
+| Resources… | Opens the Resources manager — list imported audio, HDRI, background images, and video; delete individual entries; import new files. |
+
+## Welcome screen
+
+On a fresh launch — when no auto-saved project exists in IndexedDB — the app shows a welcome overlay with the preset picker. Pick one to start from a known-good scene, or hit **Start Empty** for a blank base layer. The same picker is available any time from **File → Load Preset…**.
+
+Preset thumbnails are rendered live the first time you open the picker (the app briefly time-shares the renderer to capture each preset) and cached in `localStorage` keyed by the preset file's content hash, so subsequent opens are instant.
 
 ## Windows / Layout menus
 

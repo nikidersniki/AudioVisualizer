@@ -91,6 +91,10 @@ export class SceneBuilder {
             new ResizeObserver(_onResize).observe(canvas);
         }
 
+        // ── Pending async resource loads (HDRI, textures, video) ──
+        // Must be initialised before any setHDRI / _trackLoad call.
+        this._pendingLoads = new Set();
+
         this.selectedHDRI = PRESETS.HDRI_CATALOGUE[0].name;
         this.setHDRI(this.selectedHDRI);
 
@@ -160,6 +164,11 @@ export class SceneBuilder {
 
         window.addEventListener('keydown', e => {
             if (!this._transformControls.object) return;
+            // Swallow gizmo hotkeys while a modal popup is open or the user
+            // is typing into a form control.
+            if (document.querySelector('.popup-bg')) return;
+            const tag = e.target?.tagName;
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
             if (e.key === 't') this.setGizmoMode('translate');
             if (e.key === 'r') this.setGizmoMode('rotate');
             if (e.key === 's') this.setGizmoMode('scale');
@@ -583,6 +592,14 @@ export class SceneBuilder {
                     mesh._video = v;
                     mat.map = new VideoTexture(v);
                     mat.needsUpdate = true;
+                    const p = new Promise(resolve => {
+                        if (v.readyState >= 2) { resolve(); return; }
+                        const done = () => resolve();
+                        v.addEventListener('loadeddata', done, { once: true });
+                        v.addEventListener('error',      done, { once: true });
+                        setTimeout(done, 2500); // safety bound
+                    });
+                    this._trackLoad(p);
                 }
             } else if (!fillObj.videoName && mesh._video) {
                 mesh._video.pause(); mesh._video.src = '';
@@ -603,7 +620,12 @@ export class SceneBuilder {
                 const entry = PRESETS.BG_CATALOGUE.find(e => e.name === fillObj.imageName);
                 if (entry) {
                     mesh._imageLoadedName = fillObj.imageName;
-                    new TextureLoader().load(entry.path, tex => { mat.map = tex; mat.needsUpdate = true; });
+                    const p = new Promise(resolve => {
+                        new TextureLoader().load(entry.path, tex => {
+                            mat.map = tex; mat.needsUpdate = true; resolve();
+                        }, undefined, resolve);
+                    });
+                    this._trackLoad(p);
                 }
             } else if (!fillObj.imageName && mat.map) {
                 mat.map = null; mat.needsUpdate = true;
@@ -621,11 +643,31 @@ export class SceneBuilder {
         this.selectedHDRI = name;
         const isExr = entry.path.endsWith('.exr');
         const loader = isExr ? new EXRLoader() : new TextureLoader();
-        loader.load(entry.path, tex => {
-            tex.mapping = EquirectangularReflectionMapping;
-            PRESETS.materials.standard.envMap = tex;
-            PRESETS.materials.standard.needsUpdate = true;
+        const p = new Promise(resolve => {
+            loader.load(entry.path, tex => {
+                tex.mapping = EquirectangularReflectionMapping;
+                PRESETS.materials.standard.envMap = tex;
+                PRESETS.materials.standard.needsUpdate = true;
+                resolve();
+            }, undefined, resolve);
         });
+        this._trackLoad(p);
+    }
+
+    _trackLoad(promise) {
+        this._pendingLoads.add(promise);
+        const done = () => this._pendingLoads.delete(promise);
+        promise.then(done, done);
+        return promise;
+    }
+
+    // Resolves once every pending texture / model / video first-frame load
+    // registered through `_trackLoad` is complete. Re-checks after each drain
+    // in case a load triggered further loads.
+    async resourcesReady() {
+        while (this._pendingLoads.size > 0) {
+            await Promise.all([...this._pendingLoads]);
+        }
     }
 
     _getLoader(path) {

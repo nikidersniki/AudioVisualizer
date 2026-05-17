@@ -14,7 +14,17 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     return (
         <html lang="en" className="dark" suppressHydrationWarning>
             <body className="flex flex-col min-h-screen">
-                <RootProvider theme={{ defaultTheme: 'dark', forcedTheme: 'dark', enableSystem: false }}>
+                <RootProvider
+                    theme={{ defaultTheme: 'dark', forcedTheme: 'dark', enableSystem: false }}
+                    search={{
+                        options: {
+                            type: 'static',
+                            // Must include the Next basePath — the static client
+                            // does a bare fetch() and does not auto-prefix it.
+                            api: '/AudioVisualizer/docs/api/search',
+                        },
+                    }}
+                >
                     <DocsLayout tree={source.pageTree} {...baseOptions}>
                         {children}
                     </DocsLayout>

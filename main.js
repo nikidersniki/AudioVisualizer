@@ -111,6 +111,23 @@ _rangeObserver.observe(document.body, { childList: true, subtree: true });
 decorateAllRangeInputs();
 
 // ─────────────────────────────────────────────
+//  Global hotkey gate
+//  Swallow T/R/S/Space (and prevent browser scroll on Space) whenever a
+//  modal popup is open or focus is in a form control. Capture-phase so it
+//  beats any module-level keydown listener regardless of registration order.
+// ─────────────────────────────────────────────
+const _GATED_KEYS = new Set(['t', 'r', 's', ' ']);
+window.addEventListener('keydown', e => {
+    const tag = e.target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
+    if (!document.querySelector('.popup-bg')) return;
+    if (_GATED_KEYS.has(e.key.toLowerCase())) {
+        e.stopPropagation();
+        e.preventDefault();
+    }
+}, { capture: true });
+
+// ─────────────────────────────────────────────
 //  Scene
 // ─────────────────────────────────────────────
 const canvas  = document.getElementById('three-canvas');
@@ -792,6 +809,256 @@ async function loadLayersFromFile(file) {
 }
 
 // ─────────────────────────────────────────────
+//  Presets / Start Screen
+// ─────────────────────────────────────────────
+const BUILTIN_PRESETS = ['Colors', 'Pulsar', 'Rave', 'Wave'];
+const THUMB_W = 320, THUMB_H = 180;
+const THUMB_PREFIX = 'preset-thumb-v1:';
+
+function _thumbKey(name, hash) { return `${THUMB_PREFIX}${name}:${hash}`; }
+function _getCachedThumb(name, hash) {
+    try { return localStorage.getItem(_thumbKey(name, hash)); } catch { return null; }
+}
+function _setCachedThumb(name, hash, dataURL) {
+    try { localStorage.setItem(_thumbKey(name, hash), dataURL); } catch {}
+}
+async function _hashStr(str) {
+    const buf = new TextEncoder().encode(str);
+    const h = await crypto.subtle.digest('SHA-256', buf);
+    return Array.from(new Uint8Array(h)).slice(0, 8)
+        .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function _renderBuilderToThumb() {
+    // Drive one update so the freshly-deserialized scene renders to canvas
+    builder.update(performance.now() / 1000);
+    const src = builder.renderer.domElement;
+    const srcW = src.width, srcH = src.height;
+    if (!srcW || !srcH) return null;
+    const dst = document.createElement('canvas');
+    dst.width = THUMB_W; dst.height = THUMB_H;
+    const ctx = dst.getContext('2d');
+    const srcRatio = srcW / srcH, dstRatio = THUMB_W / THUMB_H;
+    let sx = 0, sy = 0, sw = srcW, sh = srcH;
+    if (srcRatio > dstRatio) { sw = srcH * dstRatio; sx = (srcW - sw) / 2; }
+    else                     { sh = srcW / dstRatio; sy = (srcH - sh) / 2; }
+    ctx.drawImage(src, sx, sy, sw, sh, 0, 0, THUMB_W, THUMB_H);
+    return dst.toDataURL('image/webp', 0.7);
+}
+
+// Time-shares the main builder: pauses anim loop, snapshots current project,
+// deserializes each preset, captures a thumbnail, restores the snapshot.
+let _thumbGenInProgress = null;
+async function generatePresetThumbnails(items) {
+    if (_thumbGenInProgress) await _thumbGenInProgress;
+    let release;
+    _thumbGenInProgress = new Promise(r => release = r);
+    try {
+        builder.renderer.setAnimationLoop(null);
+        const snapshot = serializeAll();
+        for (const item of items) {
+            try {
+                await deserializeAll(item.json);
+                // First update tick: kicks off lazy texture loads inside
+                // _updateImage (BG image / video first-frame).
+                builder.update(performance.now() / 1000);
+                // Wait for HDRI, BG textures, video first-frame, etc. to all
+                // finish before capturing.
+                await builder.resourcesReady();
+                await new Promise(r => requestAnimationFrame(r));
+                const dataURL = await _renderBuilderToThumb();
+                if (dataURL) _setCachedThumb(item.name, item.hash, dataURL);
+                item.onReady(dataURL);
+            } catch (e) {
+                console.warn('Preset thumbnail failed', item.name, e);
+                item.onReady(null);
+            }
+        }
+        try {
+            await deserializeAll(snapshot);
+            builder.update(performance.now() / 1000);
+            await builder.resourcesReady();
+        } catch (e) { console.warn(e); }
+    } finally {
+        builder.renderer.setAnimationLoop(animate);
+        release();
+        _thumbGenInProgress = null;
+    }
+}
+
+async function loadPresetByName(name) {
+    const url = `${import.meta.env.BASE_URL}Presets/${encodeURIComponent(name)}.json`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Preset "${name}" not found (${res.status})`);
+    const data = await res.json();
+    await deserializeAll(data);
+    currentProjectName = name;
+    renderLayerList();
+    renderAnimationList();
+    switchPPContext('global');
+    if (builder.layers.length > 0) selectLayer(builder.layers[0]);
+    await saveAllToDB();
+}
+
+async function _fetchPresetItem(name) {
+    const url = `${import.meta.env.BASE_URL}Presets/${encodeURIComponent(name)}.json`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const text = await res.text();
+    const json = JSON.parse(text);
+    const hash = await _hashStr(text);
+    return { name, json, hash };
+}
+
+function _applyThumbToCard(els, dataURL) {
+    els.thumb.style.backgroundImage = `url("${dataURL}")`;
+    els.thumb.classList.add('loaded');
+}
+
+async function showPresetPicker({ canDismiss = true } = {}) {
+    if (document.getElementById('start-screen-popup-bg')) return;
+
+    const bg = document.createElement('div');
+    bg.className = 'popup-bg';
+    bg.id = 'start-screen-popup-bg';
+
+    const popup = document.createElement('div');
+    popup.className = 'popup start-screen-popup';
+
+    const title = document.createElement('div');
+    title.className = 'h1 popup-title-text';
+    title.textContent = canDismiss ? 'Load Preset' : 'Welcome to Revisualize 3D';
+
+    let intro = null;
+    if (!canDismiss) {
+        intro = document.createElement('div');
+        intro.className = 'popup-body start-screen-intro';
+        intro.innerHTML = `
+            <p>
+                A browser-based real-time 3D audio visualizer.
+                Build scenes from <strong>models</strong>, <strong>waves</strong>,
+                <strong>lights</strong>, and <strong>images</strong>.
+                Drive any numeric property from the live audio spectrum.
+                Stack shader and native <strong>post-processing</strong> effects
+                per-layer or globally.
+            </p>
+            <p class="muted">
+                Pick a preset below to explore — or
+                <a class="start-screen-link" id="start-screen-empty-link">start with an empty scene</a>.
+                You can also load your own <strong>.json</strong> project from the File menu.
+            </p>
+            <div class="start-screen-link-row">
+                <a class="start-screen-link" href="docs/" target="_blank" rel="noopener">Documentation ↗</a>
+                <span class="muted small">Built on Three.js · v0.1</span>
+            </div>
+            <div class="start-screen-section-header">Choose a Preset to Start</div>
+        `;
+    }
+
+    const grid = document.createElement('div');
+    grid.className = 'preset-grid';
+
+    const cardEls = new Map();
+    BUILTIN_PRESETS.forEach(name => {
+        const card = document.createElement('div');
+        card.className = 'preset-card pending';
+        const thumb = document.createElement('div');
+        thumb.className = 'preset-card-thumb';
+        const label = document.createElement('div');
+        label.className = 'preset-card-label';
+        label.textContent = name;
+        card.appendChild(thumb);
+        card.appendChild(label);
+        grid.appendChild(card);
+        cardEls.set(name, { card, label, thumb });
+    });
+
+    popup.appendChild(title);
+    if (intro) popup.appendChild(intro);
+    popup.appendChild(grid);
+
+    const buttonBox = document.createElement('div');
+    buttonBox.className = 'popup-button-box';
+    const dismissBtn = document.createElement('div');
+    dismissBtn.className = 'big-Btn';
+    dismissBtn.textContent = canDismiss ? 'Close' : 'Start Empty';
+    dismissBtn.addEventListener('click', () => bg.remove());
+    buttonBox.appendChild(dismissBtn);
+    popup.appendChild(buttonBox);
+
+    bg.appendChild(popup);
+    if (canDismiss) {
+        bg.addEventListener('click', e => { if (e.target === bg) bg.remove(); });
+    }
+    document.body.appendChild(bg);
+
+    const emptyLink = intro?.querySelector('#start-screen-empty-link');
+    emptyLink?.addEventListener('click', (e) => { e.preventDefault(); bg.remove(); });
+
+    // Fetch all preset JSONs in parallel
+    const fetched = await Promise.all(BUILTIN_PRESETS.map(async name => {
+        try { return await _fetchPresetItem(name); }
+        catch (e) {
+            const els = cardEls.get(name);
+            els.card.classList.remove('pending');
+            els.card.classList.add('error');
+            els.label.textContent = `${name} (unavailable)`;
+            return null;
+        }
+    }));
+
+    const toGenerate = [];
+    for (const item of fetched) {
+        if (!item) continue;
+        const els = cardEls.get(item.name);
+        els.card.classList.remove('pending');
+
+        els.card.addEventListener('click', async () => {
+            if (_thumbGenInProgress) return; // block during generation
+            els.card.classList.add('loading');
+            try {
+                await deserializeAll(item.json);
+                currentProjectName = item.name;
+                renderLayerList();
+                renderAnimationList();
+                switchPPContext('global');
+                if (builder.layers.length > 0) selectLayer(builder.layers[0]);
+                await saveAllToDB();
+                bg.remove();
+            } catch (e) {
+                console.error(e);
+                els.card.classList.remove('loading');
+            }
+        });
+
+        const cached = _getCachedThumb(item.name, item.hash);
+        if (cached) {
+            _applyThumbToCard(els, cached);
+        } else {
+            els.card.classList.add('rendering');
+            toGenerate.push({
+                name: item.name, json: item.json, hash: item.hash,
+                onReady: (dataURL) => {
+                    els.card.classList.remove('rendering');
+                    if (dataURL) _applyThumbToCard(els, dataURL);
+                },
+            });
+        }
+    }
+
+    if (toGenerate.length > 0) {
+        grid.classList.add('grid-disabled');
+        generatePresetThumbnails(toGenerate).finally(() => {
+            grid.classList.remove('grid-disabled');
+        });
+    }
+}
+
+document.getElementById('file-load-preset')?.addEventListener('click', () => {
+    showPresetPicker({ canDismiss: true });
+});
+
+// ─────────────────────────────────────────────
 //  Audio playback
 // ─────────────────────────────────────────────
 function formatTime(s) {
@@ -1263,11 +1530,169 @@ window.addEventListener('drop', async e => {
 });
 
 const resourceInput = document.getElementById('resource-input');
-document.getElementById('add-resources').addEventListener('click', () => resourceInput.click());
 resourceInput.addEventListener('change', async e => {
     for (const file of e.target.files) await handleDroppedFile(file);
     resourceInput.value = '';
+    window.dispatchEvent(new CustomEvent('resources-changed'));
 });
+
+// ─────────────────────────────────────────────
+//  Resources popup (manages imported audio / HDRI / BG / video)
+// ─────────────────────────────────────────────
+async function _deleteAudioFileFromDB(id) {
+    const db = await openDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).delete(id);
+    return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
+}
+
+function _deleteCustomHDRI(name) {
+    const ci = customCatalogues.hdri.findIndex(e => e.name === name);
+    if (ci >= 0) customCatalogues.hdri.splice(ci, 1);
+    const pi = PRESETS.HDRI_CATALOGUE.findIndex(e => e.name === name);
+    if (pi >= 0) PRESETS.HDRI_CATALOGUE.splice(pi, 1);
+    const sel = document.getElementById('scene-hdri');
+    if (sel) {
+        const opt = sel.querySelector(`option[value="${CSS.escape(name)}"]`);
+        opt?.remove();
+        if (sel.value === name) {
+            const fallback = PRESETS.HDRI_CATALOGUE[0]?.name;
+            if (fallback) { sel.value = fallback; builder.setHDRI(fallback); }
+        }
+    }
+}
+
+function _deleteCustomBG(name) {
+    const ci = customCatalogues.bg.findIndex(e => e.name === name);
+    if (ci >= 0) customCatalogues.bg.splice(ci, 1);
+    const pi = PRESETS.BG_CATALOGUE.findIndex(e => e.name === name);
+    if (pi >= 0) PRESETS.BG_CATALOGUE.splice(pi, 1);
+}
+
+function _deleteCustomVideo(name) {
+    const ci = customCatalogues.video.findIndex(e => e.name === name);
+    if (ci >= 0) customCatalogues.video.splice(ci, 1);
+    const pi = (PRESETS.VIDEO_CATALOGUE || []).findIndex(e => e.name === name);
+    if (pi >= 0) PRESETS.VIDEO_CATALOGUE.splice(pi, 1);
+}
+
+async function _deleteAudioTrack(record) {
+    // Stop playback if this track is currently loaded
+    if (sound?.isPlaying) { sound.onEnded = null; sound.stop(); }
+    isPlaying = false;
+    try { await _deleteAudioFileFromDB(record.id); } catch (e) { console.warn(e); }
+    const idx = allTracks.indexOf(record);
+    if (idx >= 0) allTracks.splice(idx, 1);
+    document.querySelectorAll(
+        `#saved-tracks .list-button[data-track-name="${CSS.escape(record.name)}"]`
+    ).forEach(b => b.parentElement?.remove());
+}
+
+function _renderResourceSection(parent, title, items, getName, onDelete) {
+    if (!items || items.length === 0) return;
+    const section = document.createElement('div');
+    section.className = 'resources-section';
+    const h = document.createElement('div');
+    h.className = 'resources-section-header';
+    h.textContent = `${title} (${items.length})`;
+    section.appendChild(h);
+    const list = document.createElement('div');
+    list.className = 'resources-list';
+    items.forEach(it => {
+        const row = document.createElement('div');
+        row.className = 'resources-row';
+        const label = document.createElement('span');
+        label.className = 'resources-row-name';
+        label.textContent = getName(it);
+        const del = document.createElement('div');
+        del.className = 'resources-row-delete';
+        del.textContent = '×';
+        del.title = 'Delete';
+        del.addEventListener('click', async () => { await onDelete(it); });
+        row.appendChild(label);
+        row.appendChild(del);
+        list.appendChild(row);
+    });
+    section.appendChild(list);
+    parent.appendChild(section);
+}
+
+function showResourcesPopup() {
+    if (document.getElementById('resources-popup-bg')) return;
+
+    const bg = document.createElement('div');
+    bg.className = 'popup-bg';
+    bg.id = 'resources-popup-bg';
+
+    const popup = document.createElement('div');
+    popup.className = 'popup resources-popup';
+
+    const title = document.createElement('div');
+    title.className = 'h1 popup-title-text';
+    title.textContent = 'Resources';
+
+    const body = document.createElement('div');
+    body.className = 'resources-body';
+
+    const render = () => {
+        body.innerHTML = '';
+        _renderResourceSection(body, 'Audio Tracks', allTracks,
+            t => t.name,
+            async t => { await _deleteAudioTrack(t); render(); });
+        _renderResourceSection(body, 'HDRI', customCatalogues.hdri,
+            e => e.name,
+            async e => { _deleteCustomHDRI(e.name); await saveAllToDB(); render(); });
+        _renderResourceSection(body, 'Background Images', customCatalogues.bg,
+            e => e.name,
+            async e => { _deleteCustomBG(e.name); await saveAllToDB(); render(); });
+        _renderResourceSection(body, 'Video', customCatalogues.video,
+            e => e.name,
+            async e => { _deleteCustomVideo(e.name); await saveAllToDB(); render(); });
+
+        const total = allTracks.length + customCatalogues.hdri.length
+            + customCatalogues.bg.length + customCatalogues.video.length;
+        if (total === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'resources-empty';
+            empty.textContent = 'No imported resources yet. Click Import to add audio, images, or video.';
+            body.appendChild(empty);
+        }
+    };
+    render();
+
+    const onResourcesChanged = () => render();
+    window.addEventListener('resources-changed', onResourcesChanged);
+
+    popup.appendChild(title);
+    popup.appendChild(body);
+
+    const buttonBox = document.createElement('div');
+    buttonBox.className = 'popup-button-box';
+
+    const importBtn = document.createElement('div');
+    importBtn.className = 'big-Btn';
+    importBtn.textContent = 'Import';
+    importBtn.addEventListener('click', () => resourceInput.click());
+
+    const closeBtn = document.createElement('div');
+    closeBtn.className = 'big-Btn';
+    closeBtn.textContent = 'Close';
+    const close = () => {
+        window.removeEventListener('resources-changed', onResourcesChanged);
+        bg.remove();
+    };
+    closeBtn.addEventListener('click', close);
+
+    buttonBox.appendChild(importBtn);
+    buttonBox.appendChild(closeBtn);
+    popup.appendChild(buttonBox);
+
+    bg.appendChild(popup);
+    bg.addEventListener('click', e => { if (e.target === bg) close(); });
+    document.body.appendChild(bg);
+}
+
+document.getElementById('manage-resources')?.addEventListener('click', showResourcesPopup);
 
 // ─────────────────────────────────────────────
 //  Progress bar
@@ -2811,6 +3236,7 @@ window.addEventListener('load', async () => {
     ppContexts.set('global', { layers: [], pipeline: globalPipeline });
 
     const saved = await loadAllFromDB();
+    const noProject = !(saved?.length > 0);
     if (saved?.length > 0) {
         await deserializeAll(saved);
     } else {
@@ -2822,6 +3248,7 @@ window.addEventListener('load', async () => {
     switchPPContext('global');
 
     if (builder.layers.length > 0) selectLayer(builder.layers[0]);
+    if (noProject) showPresetPicker({ canDismiss: false });
     const lastPlaying = allTracks.find(t => t.isPlaying);
     if (lastPlaying) loadAudioFromRecord(lastPlaying);
 

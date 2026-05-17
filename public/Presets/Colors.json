@@ -1,0 +1,1235 @@
+[
+  {
+    "id": "global",
+    "name": "Global",
+    "isGlobal": true,
+    "objects": [],
+    "ppLayers": [
+      {
+        "id": "e072b662-be97-4582-8f1b-1c80b3ea83da",
+        "shaderName": "blur",
+        "name": "Blur",
+        "visible": true,
+        "properties": {
+          "radius": 2.2
+        },
+        "propertyBindings": {}
+      },
+      {
+        "id": "d57d7416-df63-46c9-8517-ba16ea032159",
+        "shaderName": "sharpen",
+        "name": "Sharpen",
+        "visible": true,
+        "properties": {
+          "amount": 1,
+          "radius": 1,
+          "threshold": 0
+        },
+        "propertyBindings": {}
+      }
+    ],
+    "bgColor": "#000000",
+    "hdri": "Studio",
+    "volume": 1,
+    "syncedVideoObjId": null,
+    "glLayout": {
+      "root": {
+        "type": "row",
+        "content": [
+          {
+            "type": "column",
+            "content": [
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Outliner",
+                    "componentType": "outliner",
+                    "componentState": {}
+                  }
+                ],
+                "size": "45.45454545454545%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              },
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Saved Tracks",
+                    "componentType": "saved-tracks",
+                    "componentState": {}
+                  }
+                ],
+                "size": "54.54545454545454%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              }
+            ],
+            "size": "10.234802313559815%",
+            "id": "",
+            "isClosable": true
+          },
+          {
+            "type": "column",
+            "content": [
+              {
+                "type": "row",
+                "content": [
+                  {
+                    "type": "column",
+                    "content": [
+                      {
+                        "type": "stack",
+                        "content": [
+                          {
+                            "type": "component",
+                            "size": "1fr",
+                            "id": "",
+                            "maximised": false,
+                            "isClosable": true,
+                            "reorderEnabled": true,
+                            "title": "Animation",
+                            "componentType": "animation",
+                            "componentState": {}
+                          }
+                        ],
+                        "size": "59.59595959595959%",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "activeItemIndex": 0
+                      },
+                      {
+                        "type": "stack",
+                        "content": [
+                          {
+                            "type": "component",
+                            "size": "1fr",
+                            "id": "",
+                            "maximised": false,
+                            "isClosable": true,
+                            "reorderEnabled": true,
+                            "title": "Audio Monitor",
+                            "componentType": "audio-monitor",
+                            "componentState": {}
+                          }
+                        ],
+                        "size": "40.4040404040404%",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "activeItemIndex": 0
+                      }
+                    ],
+                    "size": "13.398692810457511%",
+                    "id": "",
+                    "isClosable": true
+                  },
+                  {
+                    "type": "stack",
+                    "content": [
+                      {
+                        "type": "component",
+                        "size": "1fr",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "Viewport",
+                        "componentType": "viewport",
+                        "componentState": {}
+                      }
+                    ],
+                    "size": "86.60130718954247%",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "activeItemIndex": 0
+                  }
+                ],
+                "size": "85.85858585858585%",
+                "id": "",
+                "isClosable": true
+              },
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Player",
+                    "componentType": "progress-bar",
+                    "componentState": {}
+                  }
+                ],
+                "size": "14.14141414141414%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              }
+            ],
+            "size": "68.15358781979677%",
+            "id": "",
+            "isClosable": true
+          },
+          {
+            "type": "column",
+            "content": [
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Object Editor",
+                    "componentType": "object-editor",
+                    "componentState": {}
+                  }
+                ],
+                "size": "23.46938775510204%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              },
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Post Processing",
+                    "componentType": "post-processing",
+                    "componentState": {}
+                  }
+                ],
+                "size": "46.93877551020408%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              },
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Project Settings",
+                    "componentType": "project-settings",
+                    "componentState": {}
+                  },
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Settings",
+                    "componentType": "settings",
+                    "componentState": {}
+                  }
+                ],
+                "size": "29.591836734693878%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              }
+            ],
+            "size": "21.611609866643423%",
+            "id": "",
+            "isClosable": true
+          }
+        ],
+        "size": "1fr",
+        "id": "",
+        "isClosable": true
+      },
+      "openPopouts": [],
+      "settings": {
+        "constrainDragToContainer": true,
+        "reorderEnabled": true,
+        "popoutWholeStack": false,
+        "blockedPopoutsThrowError": true,
+        "closePopoutsOnUnload": true,
+        "responsiveMode": "none",
+        "tabOverlapAllowance": 0,
+        "reorderOnTabMenuClick": true,
+        "tabControlOffset": 10,
+        "popInOnClose": false
+      },
+      "dimensions": {
+        "borderWidth": 5,
+        "borderGrabWidth": 5,
+        "defaultMinItemHeight": "0px",
+        "defaultMinItemWidth": "10px",
+        "headerHeight": 20,
+        "dragProxyWidth": 300,
+        "dragProxyHeight": 200
+      },
+      "header": {
+        "show": "top",
+        "popout": false,
+        "dock": "dock",
+        "close": "close",
+        "maximise": false,
+        "minimise": "minimise",
+        "tabDropdown": "additional tabs"
+      }
+    },
+    "customCatalogues": {
+      "hdri": [],
+      "bg": [],
+      "video": []
+    },
+    "animatedProperties": [
+      {
+        "objectId": "b39248bc-7511-4124-9e8d-c0a13a0c2fa1",
+        "key": "globalScale",
+        "label": "Scale",
+        "range": {
+          "min": -10,
+          "max": 10
+        }
+      },
+      {
+        "objectId": "e1da3421-2a0f-4d4e-adbf-9d5ed3e9987a",
+        "key": "hue",
+        "label": "Hue",
+        "range": {
+          "min": -0.5,
+          "max": 0.5
+        },
+        "isPP": true,
+        "ppContextId": "7e28648d-2a59-4cf1-9627-b569a01eaa30"
+      },
+      {
+        "objectId": "961d77a9-2849-4a29-b9bb-0d183f3b10cb",
+        "key": "noiseAmount",
+        "label": "Noise Amount",
+        "range": {
+          "min": -10,
+          "max": 10
+        }
+      },
+      {
+        "objectId": "a7de6728-1e3a-46cd-b2c4-fd4d5fef0bc4",
+        "key": "hue",
+        "label": "Hue",
+        "range": {
+          "min": -0.5,
+          "max": 0.5
+        },
+        "isPP": true,
+        "ppContextId": "87cea5b2-0c0c-4076-b37e-deacf46080ef"
+      },
+      {
+        "objectId": "961d77a9-2849-4a29-b9bb-0d183f3b10cb",
+        "key": "noiseScale",
+        "label": "Noise Scale",
+        "range": {
+          "min": -10,
+          "max": 10
+        }
+      },
+      {
+        "objectId": "2bfb95c2-9776-4abd-aa9a-ded5ec5b870e",
+        "key": "amplitude",
+        "label": "Amplitude",
+        "range": {
+          "min": -10,
+          "max": 10
+        }
+      },
+      {
+        "objectId": "6a674b1d-06fd-4990-ad6f-c3e0a8c5c99d",
+        "key": "amplitude",
+        "label": "Amplitude",
+        "range": {
+          "min": -10,
+          "max": 10
+        }
+      },
+      {
+        "objectId": "e2b3060a-50c0-4410-b280-7b394f8f3dcf",
+        "key": "amplitude",
+        "label": "Amplitude",
+        "range": {
+          "min": -10,
+          "max": 10
+        }
+      },
+      {
+        "objectId": "b2465051-eab7-4fa9-ba0c-62fd3ef826d1",
+        "key": "hue",
+        "label": "Hue",
+        "range": {
+          "min": -0.5,
+          "max": 0.5
+        },
+        "isPP": true,
+        "ppContextId": "39ed132f-cca9-45b2-a880-22da8c26e01f"
+      }
+    ]
+  },
+  {
+    "id": "7e28648d-2a59-4cf1-9627-b569a01eaa30",
+    "name": "Background",
+    "isBase": true,
+    "visible": true,
+    "opacity": 1,
+    "objects": [
+      {
+        "id": "b39248bc-7511-4124-9e8d-c0a13a0c2fa1",
+        "type": "image",
+        "name": "Image",
+        "visible": true,
+        "posX": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posY": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotX": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotY": {
+          "mode": "constant",
+          "value": -1.6227887340350756e-21,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleX": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleY": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleZ": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "globalScale": {
+          "mode": "audio",
+          "value": 1,
+          "source": "beat",
+          "min": 5.741,
+          "max": 6.312,
+          "curve": "exponential"
+        },
+        "mediaType": "image",
+        "imageName": "Flare",
+        "videoName": null,
+        "playbackRate": 1,
+        "audioScale": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "spinSpeed": {
+          "mode": "constant",
+          "value": -0.04,
+          "source": "bass",
+          "min": 0,
+          "max": 0.01,
+          "curve": "linear"
+        },
+        "spinAxis": "+z",
+        "opacity": 1
+      }
+    ],
+    "ppLayers": [
+      {
+        "id": "75450c0f-a3bf-4196-afc4-c402c3e97ed4",
+        "shaderName": "hsv",
+        "name": "Hue / Saturation / Color",
+        "visible": true,
+        "properties": {
+          "hue": 0,
+          "saturation": 1.81,
+          "value": 1.15,
+          "fac": 1,
+          "color": "#ff0000"
+        },
+        "propertyBindings": {}
+      },
+      {
+        "id": "46b6b244-1e12-4768-af1b-8b85478033b0",
+        "shaderName": "ascii",
+        "name": "ASCII",
+        "visible": true,
+        "properties": {
+          "cellSize": 18,
+          "colors": 123
+        },
+        "propertyBindings": {}
+      },
+      {
+        "id": "e1da3421-2a0f-4d4e-adbf-9d5ed3e9987a",
+        "shaderName": "hsv",
+        "name": "Hue / Saturation / Color",
+        "visible": true,
+        "properties": {
+          "hue": 0,
+          "saturation": 2,
+          "value": 0.97,
+          "fac": 1,
+          "color": "#ffffff"
+        },
+        "propertyBindings": {
+          "hue": {
+            "mode": "audio",
+            "value": 0,
+            "source": "presence",
+            "min": -0.008,
+            "max": 0.778,
+            "curve": "linear"
+          }
+        }
+      }
+    ]
+  },
+  {
+    "id": "39ed132f-cca9-45b2-a880-22da8c26e01f",
+    "name": "Graphs",
+    "isBase": false,
+    "visible": true,
+    "opacity": 1,
+    "objects": [
+      {
+        "id": "e2b3060a-50c0-4410-b280-7b394f8f3dcf",
+        "type": "wave",
+        "name": "Line",
+        "visible": true,
+        "posX": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posY": {
+          "mode": "constant",
+          "value": -2.1606691010610386,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posZ": {
+          "mode": "constant",
+          "value": -0.12,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotX": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotY": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleX": {
+          "mode": "constant",
+          "value": 3.9,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleY": {
+          "mode": "constant",
+          "value": 0.07613985243160232,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleZ": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "globalScale": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "waveType": "linear-up",
+        "segments": 244,
+        "color": "#ffffff",
+        "fillColor": "#392bfd",
+        "fill": true,
+        "amplitude": {
+          "mode": "audio",
+          "value": 10,
+          "source": "beat",
+          "min": 8.362,
+          "max": 10,
+          "curve": "exponential"
+        },
+        "radius": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "width": {
+          "mode": "constant",
+          "value": 2,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "barSpacing": {
+          "mode": "constant",
+          "value": 0.05,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "sampleCount": 100,
+        "lineWidth": 15.3,
+        "opacity": 0.5,
+        "colorReactive": true,
+        "colorSensitivity": 0.5
+      },
+      {
+        "id": "2bfb95c2-9776-4abd-aa9a-ded5ec5b870e",
+        "type": "wave",
+        "name": "Wave",
+        "visible": true,
+        "posX": {
+          "mode": "constant",
+          "value": -3.7425548895244036,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posY": {
+          "mode": "constant",
+          "value": -2.1198848737391898,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotX": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotY": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleX": {
+          "mode": "constant",
+          "value": 0.27586206896551807,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleY": {
+          "mode": "constant",
+          "value": 4.344827586206894,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleZ": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "globalScale": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "waveType": "line",
+        "segments": 64,
+        "color": "#ffffff",
+        "fillColor": "#3300ff",
+        "fill": true,
+        "amplitude": {
+          "mode": "audio",
+          "value": 10,
+          "source": "bass",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "radius": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "width": {
+          "mode": "constant",
+          "value": 2,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "barSpacing": {
+          "mode": "constant",
+          "value": 0.05,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "sampleCount": 100,
+        "lineWidth": 3.2,
+        "opacity": 1,
+        "colorReactive": true,
+        "colorSensitivity": 2
+      },
+      {
+        "id": "6a674b1d-06fd-4990-ad6f-c3e0a8c5c99d",
+        "type": "wave",
+        "name": "Wave copy",
+        "visible": true,
+        "posX": {
+          "mode": "constant",
+          "value": 3.7472425428537828,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posY": {
+          "mode": "constant",
+          "value": -2.1198848737391898,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotX": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotY": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleX": {
+          "mode": "constant",
+          "value": 0.27586206896551807,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleY": {
+          "mode": "constant",
+          "value": 4.344827586206894,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleZ": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "globalScale": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "waveType": "line",
+        "segments": 64,
+        "color": "#ffffff",
+        "fillColor": "#ff0000",
+        "fill": true,
+        "amplitude": {
+          "mode": "audio",
+          "value": 0.5,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "radius": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "width": {
+          "mode": "constant",
+          "value": 2,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "barSpacing": {
+          "mode": "constant",
+          "value": 0.05,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "sampleCount": 100,
+        "lineWidth": 5,
+        "opacity": 1,
+        "colorReactive": true,
+        "colorSensitivity": 2
+      }
+    ],
+    "ppLayers": [
+      {
+        "id": "9973082e-83a8-4eb9-a24b-bea45a0361af",
+        "type": "native",
+        "passType": "afterimage",
+        "name": "Afterimage",
+        "visible": true,
+        "properties": {
+          "damp": 0.86
+        },
+        "propertyBindings": {}
+      },
+      {
+        "id": "b2465051-eab7-4fa9-ba0c-62fd3ef826d1",
+        "shaderName": "hsv",
+        "name": "Hue / Saturation / Color",
+        "visible": true,
+        "properties": {
+          "hue": 0,
+          "saturation": 2,
+          "value": 1.24,
+          "fac": 1,
+          "color": "#ffffff"
+        },
+        "propertyBindings": {
+          "hue": {
+            "mode": "audio",
+            "value": 0,
+            "source": "beat",
+            "min": -0.5,
+            "max": 0.5,
+            "curve": "linear"
+          }
+        }
+      },
+      {
+        "id": "508160f1-aaee-4bc5-8b88-217255484421",
+        "shaderName": "colorBlocks",
+        "name": "Color Blocks",
+        "visible": true,
+        "properties": {
+          "intensity": 11
+        },
+        "propertyBindings": {}
+      },
+      {
+        "id": "858b3944-f446-4a60-9196-7a339a6293e5",
+        "type": "native",
+        "passType": "unrealBloom",
+        "name": "Bloom (Unreal)",
+        "visible": true,
+        "properties": {
+          "threshold": 0,
+          "strength": 0.71,
+          "radius": 0.05,
+          "samples": 5
+        },
+        "propertyBindings": {}
+      }
+    ]
+  },
+  {
+    "id": "87cea5b2-0c0c-4076-b37e-deacf46080ef",
+    "name": "Foreground",
+    "isBase": false,
+    "visible": true,
+    "opacity": 1,
+    "objects": [
+      {
+        "id": "961d77a9-2849-4a29-b9bb-0d183f3b10cb",
+        "type": "model",
+        "name": "eco-sphere",
+        "visible": true,
+        "posX": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posY": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotX": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotY": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleX": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleY": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleZ": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "globalScale": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "modelName": "eco-sphere",
+        "materialType": "standard",
+        "color": "#ff0000",
+        "wireframeLineWidth": 2,
+        "roughness": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "metalness": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "useMapTexture": false,
+        "useRoughnessMapTexture": false,
+        "useMetalnessMapTexture": false,
+        "useNormalMapTexture": false,
+        "noiseScale": {
+          "mode": "audio",
+          "value": 1,
+          "source": "sub",
+          "min": 0,
+          "max": 1.654,
+          "curve": "linear"
+        },
+        "noiseAmount": {
+          "mode": "audio",
+          "value": 1,
+          "source": "beat",
+          "min": 0.301,
+          "max": 10,
+          "curve": "linear"
+        },
+        "audioScale": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0.5,
+          "max": 1,
+          "curve": "linear"
+        },
+        "spinSpeed": {
+          "mode": "constant",
+          "value": 0,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "spinAxis": "+y",
+        "opacity": 0.9,
+        "smoothShading": true,
+        "colorReactive": false,
+        "colorSensitivity": 0.5
+      }
+    ],
+    "ppLayers": [
+      {
+        "id": "7130c499-dbbc-415c-95f4-9aaa2f5f3f3c",
+        "shaderName": "outline",
+        "name": "Outline",
+        "visible": true,
+        "properties": {
+          "amount": 1.27,
+          "thickness": 10,
+          "color": "#ff0000"
+        },
+        "propertyBindings": {}
+      },
+      {
+        "id": "a7de6728-1e3a-46cd-b2c4-fd4d5fef0bc4",
+        "shaderName": "hsv",
+        "name": "Hue / Saturation / Color",
+        "visible": true,
+        "properties": {
+          "hue": 0,
+          "saturation": 1,
+          "value": 1,
+          "fac": 1,
+          "color": "#ffffff"
+        },
+        "propertyBindings": {
+          "hue": {
+            "mode": "audio",
+            "value": 0,
+            "source": "beat",
+            "min": -0.5,
+            "max": 0.5,
+            "curve": "linear"
+          }
+        }
+      },
+      {
+        "id": "b0ae5950-9c60-4e2b-aca6-c3b9d4d2c504",
+        "type": "native",
+        "passType": "afterimage",
+        "name": "Afterimage",
+        "visible": true,
+        "properties": {
+          "damp": 0.75
+        },
+        "propertyBindings": {}
+      }
+    ]
+  }
+]

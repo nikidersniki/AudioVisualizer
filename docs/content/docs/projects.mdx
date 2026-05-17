@@ -24,3 +24,28 @@ The current project auto-saves to IndexedDB between sessions. Reload the page an
 ## Resources are embedded
 
 When you **Add Resources**, the files are stored as data URLs inside the project. This means project files are larger than just the scene description, but they're fully portable — share one JSON and the recipient gets the textures and videos too.
+
+## Bundled presets
+
+A handful of presets ship with the app under `public/Presets/`:
+
+| Preset | Vibe |
+|---|---|
+| `Pulsar` | Bass-driven sphere with glow |
+| `Rave` | High-energy strobe / colour grade stack |
+| `Wave` | Reactive displacement wave |
+| `Colors` | Calm chromatic palette study |
+
+Open the picker from **File → Load Preset…**, or pick one from the welcome screen on first launch.
+
+### Thumbnails
+
+The picker renders each preset live the first time you open it: the main builder is briefly paused, the preset is deserialized into the existing renderer, the app waits for all async resources (HDRI, textures, video first frame) via `SceneBuilder.resourcesReady()`, one frame is captured, and the previous scene is restored. The resulting thumbnail is cached in `localStorage` keyed by `preset-thumb-v1:{name}:{sha256_8}` of the preset's JSON text, so subsequent opens are instant. Editing a preset file invalidates its thumbnail automatically.
+
+### Adding your own preset
+
+1. Save a project from disk: **File → Save Project**.
+2. Drop the `.json` into `public/Presets/`.
+3. Add its filename (without extension) to the `BUILTIN_PRESETS` array in `main.js` so the picker discovers it.
+
+The browser can't list directories at runtime, which is why the preset list is hardcoded.

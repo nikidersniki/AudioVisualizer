@@ -1,0 +1,644 @@
+[
+  {
+    "id": "global",
+    "name": "Global",
+    "isGlobal": true,
+    "objects": [],
+    "ppLayers": [
+      {
+        "id": "aa0a4f67-dbdd-4d08-8449-e2ef740d639f",
+        "shaderName": "colorBlocks",
+        "name": "Color Blocks",
+        "visible": true,
+        "properties": {
+          "intensity": 5
+        },
+        "propertyBindings": {}
+      },
+      {
+        "id": "15965e18-3b37-4dd7-a234-ac8fd87830f5",
+        "type": "native",
+        "passType": "unrealBloom",
+        "name": "Bloom (Unreal)",
+        "visible": true,
+        "properties": {
+          "threshold": 0.06,
+          "strength": 5,
+          "radius": 0.84,
+          "samples": 5
+        },
+        "propertyBindings": {}
+      },
+      {
+        "id": "37298764-13b3-4788-8acc-7303567b3bac",
+        "shaderName": "pixelArt",
+        "name": "Pixless Dither",
+        "visible": true,
+        "properties": {
+          "ditherIntensity": 0.38,
+          "pixelSize": 1,
+          "colorLevels": 7,
+          "globalMix": 1
+        },
+        "propertyBindings": {}
+      },
+      {
+        "id": "e155db4c-09dc-4f81-b05d-2c951010a9dc",
+        "shaderName": "dotScreen",
+        "name": "Dot Screen",
+        "visible": true,
+        "properties": {
+          "angle": 0.5,
+          "scale": 0.9,
+          "keepColors": true
+        },
+        "propertyBindings": {}
+      }
+    ],
+    "bgColor": "#000000",
+    "hdri": "Studio",
+    "volume": 0.9,
+    "syncedVideoObjId": null,
+    "glLayout": {
+      "root": {
+        "type": "row",
+        "content": [
+          {
+            "type": "column",
+            "content": [
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Outliner",
+                    "componentType": "outliner",
+                    "componentState": {}
+                  }
+                ],
+                "size": "45.45454545454545%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              },
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Saved Tracks",
+                    "componentType": "saved-tracks",
+                    "componentState": {}
+                  }
+                ],
+                "size": "54.54545454545454%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              }
+            ],
+            "size": "18.181818181818183%",
+            "id": "",
+            "isClosable": true
+          },
+          {
+            "type": "column",
+            "content": [
+              {
+                "type": "row",
+                "content": [
+                  {
+                    "type": "column",
+                    "content": [
+                      {
+                        "type": "stack",
+                        "content": [
+                          {
+                            "type": "component",
+                            "size": "1fr",
+                            "id": "",
+                            "maximised": false,
+                            "isClosable": true,
+                            "reorderEnabled": true,
+                            "title": "Animation",
+                            "componentType": "animation",
+                            "componentState": {}
+                          }
+                        ],
+                        "size": "50%",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "activeItemIndex": 0
+                      },
+                      {
+                        "type": "stack",
+                        "content": [
+                          {
+                            "type": "component",
+                            "size": "1fr",
+                            "id": "",
+                            "maximised": false,
+                            "isClosable": true,
+                            "reorderEnabled": true,
+                            "title": "Settings",
+                            "componentType": "settings",
+                            "componentState": {}
+                          }
+                        ],
+                        "size": "50%",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "activeItemIndex": 0
+                      }
+                    ],
+                    "size": "21.356615177971793%",
+                    "id": "",
+                    "isClosable": true
+                  },
+                  {
+                    "type": "stack",
+                    "content": [
+                      {
+                        "type": "component",
+                        "size": "1fr",
+                        "id": "",
+                        "maximised": false,
+                        "isClosable": true,
+                        "reorderEnabled": true,
+                        "title": "Viewport",
+                        "componentType": "viewport",
+                        "componentState": {}
+                      }
+                    ],
+                    "size": "78.64338482202821%",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "activeItemIndex": 0
+                  }
+                ],
+                "size": "85.85858585858585%",
+                "id": "",
+                "isClosable": true
+              },
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Player",
+                    "componentType": "progress-bar",
+                    "componentState": {}
+                  }
+                ],
+                "size": "14.14141414141414%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              }
+            ],
+            "size": "58.58585858585859%",
+            "id": "",
+            "isClosable": true
+          },
+          {
+            "type": "column",
+            "content": [
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Object Editor",
+                    "componentType": "object-editor",
+                    "componentState": {}
+                  }
+                ],
+                "size": "35.35353535353536%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              },
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Post Processing",
+                    "componentType": "post-processing",
+                    "componentState": {}
+                  }
+                ],
+                "size": "35.35353535353536%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              },
+              {
+                "type": "stack",
+                "content": [
+                  {
+                    "type": "component",
+                    "size": "1fr",
+                    "id": "",
+                    "maximised": false,
+                    "isClosable": true,
+                    "reorderEnabled": true,
+                    "title": "Project Settings",
+                    "componentType": "project-settings",
+                    "componentState": {}
+                  }
+                ],
+                "size": "29.292929292929294%",
+                "id": "",
+                "maximised": false,
+                "isClosable": true,
+                "activeItemIndex": 0
+              }
+            ],
+            "size": "23.232323232323232%",
+            "id": "",
+            "isClosable": true
+          }
+        ],
+        "size": "1fr",
+        "id": "",
+        "isClosable": true
+      },
+      "openPopouts": [],
+      "settings": {
+        "constrainDragToContainer": true,
+        "reorderEnabled": true,
+        "popoutWholeStack": false,
+        "blockedPopoutsThrowError": true,
+        "closePopoutsOnUnload": true,
+        "responsiveMode": "none",
+        "tabOverlapAllowance": 0,
+        "reorderOnTabMenuClick": true,
+        "tabControlOffset": 10,
+        "popInOnClose": false
+      },
+      "dimensions": {
+        "borderWidth": 5,
+        "borderGrabWidth": 5,
+        "defaultMinItemHeight": "0px",
+        "defaultMinItemWidth": "10px",
+        "headerHeight": 20,
+        "dragProxyWidth": 300,
+        "dragProxyHeight": 200
+      },
+      "header": {
+        "show": "top",
+        "popout": false,
+        "dock": "dock",
+        "close": "close",
+        "maximise": false,
+        "minimise": "minimise",
+        "tabDropdown": "additional tabs"
+      }
+    },
+    "customCatalogues": {
+      "hdri": [],
+      "bg": [],
+      "video": []
+    },
+    "animatedProperties": [
+      {
+        "objectId": "5e6c5adf-a49d-4bc7-a2cf-038ed176a403",
+        "key": "noiseScale",
+        "label": "Noise Scale",
+        "range": {
+          "min": -10,
+          "max": 10
+        }
+      },
+      {
+        "objectId": "5e6c5adf-a49d-4bc7-a2cf-038ed176a403",
+        "key": "noiseAmount",
+        "label": "Noise Amount",
+        "range": {
+          "min": -10,
+          "max": 10
+        }
+      },
+      {
+        "objectId": "7a30057f-8fae-48ba-9854-7cfea829b006",
+        "key": "globalScale",
+        "label": "Scale",
+        "range": {
+          "min": -10,
+          "max": 10
+        }
+      }
+    ]
+  },
+  {
+    "id": "633d5adc-244b-4838-907b-81243b6c4dd6",
+    "name": "Background",
+    "isBase": true,
+    "visible": true,
+    "opacity": 1,
+    "objects": [
+      {
+        "id": "7a30057f-8fae-48ba-9854-7cfea829b006",
+        "type": "image",
+        "name": "Image",
+        "visible": true,
+        "posX": {
+          "mode": "constant",
+          "value": 0.06980262063149678,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posY": {
+          "mode": "constant",
+          "value": 0,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotX": {
+          "mode": "constant",
+          "value": 0,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotY": {
+          "mode": "constant",
+          "value": 0,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotZ": {
+          "mode": "constant",
+          "value": 67379.30243599998,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleX": {
+          "mode": "constant",
+          "value": 2.6404494382022463,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 10,
+          "curve": "linear"
+        },
+        "scaleY": {
+          "mode": "constant",
+          "value": 1.8450704225352113,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 10,
+          "curve": "linear"
+        },
+        "scaleZ": {
+          "mode": "constant",
+          "value": 1,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "globalScale": {
+          "mode": "audio",
+          "value": 1,
+          "source": "beat",
+          "min": 0.638,
+          "max": 1.383,
+          "curve": "linear"
+        },
+        "mediaType": "image",
+        "imageName": "Flare",
+        "videoName": null,
+        "playbackRate": 1,
+        "audioScale": {
+          "mode": "constant",
+          "value": 1,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "spinSpeed": {
+          "mode": "constant",
+          "value": 0.37,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "spinAxis": "+z",
+        "opacity": 1
+      }
+    ],
+    "ppLayers": []
+  },
+  {
+    "id": "ea07428f-b4f7-4633-bb06-cb9ab8278229",
+    "name": "asdf",
+    "isBase": false,
+    "visible": true,
+    "opacity": 1,
+    "objects": [
+      {
+        "id": "5e6c5adf-a49d-4bc7-a2cf-038ed176a403",
+        "type": "model",
+        "name": "monke",
+        "visible": true,
+        "posX": {
+          "mode": "constant",
+          "value": 0,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posY": {
+          "mode": "constant",
+          "value": 0,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "posZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotX": {
+          "mode": "constant",
+          "value": 0,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotY": {
+          "mode": "constant",
+          "value": 0,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "rotZ": {
+          "mode": "constant",
+          "value": 0,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleX": {
+          "mode": "constant",
+          "value": 1,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleY": {
+          "mode": "constant",
+          "value": 1,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "scaleZ": {
+          "mode": "constant",
+          "value": 1,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "globalScale": {
+          "mode": "constant",
+          "value": 1,
+          "source": "beat",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "modelName": "eco-sphere",
+        "materialType": "standard",
+        "color": "#8f3d3d",
+        "wireframeLineWidth": 2,
+        "roughness": {
+          "mode": "constant",
+          "value": 1,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "metalness": {
+          "mode": "constant",
+          "value": 0,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "useMapTexture": false,
+        "useRoughnessMapTexture": false,
+        "useMetalnessMapTexture": false,
+        "useNormalMapTexture": false,
+        "noiseType": "simplex",
+        "displaceDirection": "radial",
+        "noiseScale": {
+          "mode": "audio",
+          "value": 1.29,
+          "source": "bass",
+          "min": 0,
+          "max": 1.809,
+          "curve": "exponential"
+        },
+        "noiseAmount": {
+          "mode": "audio",
+          "value": -3.24,
+          "source": "bass",
+          "min": -0.303,
+          "max": 5.638,
+          "curve": "exponential"
+        },
+        "audioScale": {
+          "mode": "constant",
+          "value": -0.62,
+          "source": "avgFrequency",
+          "min": 0.5,
+          "max": 1,
+          "curve": "linear"
+        },
+        "spinSpeed": {
+          "mode": "constant",
+          "value": 0.34,
+          "source": "avgFrequency",
+          "min": 0,
+          "max": 1,
+          "curve": "linear"
+        },
+        "spinAxis": "+y",
+        "opacity": 1,
+        "smoothShading": true,
+        "colorReactive": false,
+        "colorSensitivity": 0.5
+      }
+    ],
+    "ppLayers": []
+  }
+]
