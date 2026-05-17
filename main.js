@@ -3441,3 +3441,20 @@ function animate(time) {
 }
 
 builder.renderer.setAnimationLoop(animate);
+
+// ─────────────────────────────────────────────
+//  Background-tab flicker fix
+//  Browsers throttle / suspend rAF when the tab is hidden, so when the
+//  user returns the first frame can flash stale render-target / PP
+//  ping-pong contents. Hard-stop the loop on hide and reattach on show.
+//  Skipped while the preset thumbnail generator is mid-flight — it owns
+//  the loop and will re-attach in its `finally`.
+// ─────────────────────────────────────────────
+document.addEventListener('visibilitychange', () => {
+    if (_thumbGenInProgress) return;
+    if (document.hidden) {
+        builder.renderer.setAnimationLoop(null);
+    } else {
+        builder.renderer.setAnimationLoop(animate);
+    }
+});
