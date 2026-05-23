@@ -128,10 +128,293 @@ window.addEventListener('keydown', e => {
 }, { capture: true });
 
 // ─────────────────────────────────────────────
+//  Theme system
+//  All colours derive from a small {bg, panel, accent, text} seed; the
+//  rest (lifts, hovers, border alpha, scrollbar, grain) are computed so
+//  themes stay coherent and adding a new one is trivial.
+// ─────────────────────────────────────────────
+function _hexToRgb(hex) {
+    let h = hex.replace('#', '');
+    if (h.length === 3) h = h.split('').map(c => c + c).join('');
+    const n = parseInt(h, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+function _rgbToHex(rgb) {
+    return '#' + rgb.map(v => Math.round(v).toString(16).padStart(2, '0')).join('');
+}
+function _rgba(rgb, a) { return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${a})`; }
+function _lerpHex(a, b, t) {
+    const A = _hexToRgb(a), B = _hexToRgb(b);
+    return _rgbToHex([A[0]+(B[0]-A[0])*t, A[1]+(B[1]-A[1])*t, A[2]+(B[2]-A[2])*t]);
+}
+function _isLight(hex) {
+    const [r, g, b] = _hexToRgb(hex);
+    return (r * 0.299 + g * 0.587 + b * 0.114) > 140; // perceptual luminance
+}
+
+function deriveTheme({ bg, panel, accent, text }) {
+    const liftTowards = _isLight(bg) ? '#000000' : '#ffffff';
+    const accentRgb   = _hexToRgb(accent);
+    const textRgb     = _hexToRgb(text);
+    const panelRgb    = _hexToRgb(panel);
+    return {
+        '--bg':                bg,
+        '--bg-panel':          panel,
+        '--bg-lift':           _lerpHex(bg, liftTowards, 0.06),
+        '--bg-hover':          _lerpHex(bg, liftTowards, 0.12),
+        '--border':            _rgba(textRgb, 0.12),
+        '--border-bright':     _rgba(textRgb, 0.35),
+        '--accent':            accent,
+        '--accent-dim':        _rgba(accentRgb, 0.15),
+        '--accent-glow':       _rgba(accentRgb, 0.06),
+        '--text':              _rgba(textRgb, 0.88),
+        '--text-dim':          _rgba(textRgb, 0.53),
+        '--text-faint':        _rgba(textRgb, 0.76),
+        '--scroll-thumb':      _rgba(accentRgb, 0.35),
+        '--scroll-thumb-hover':_rgba(accentRgb, 0.55),
+        '--grain':             _rgba(_isLight(bg) ? [0,0,0] : [255,255,255], 0.012),
+        '--pannel-bg':         _rgba(panelRgb, 0.61),
+    };
+}
+
+const THEME_SEEDS = {
+    'Terminal Noir': { bg: '#080808', panel: '#0d0d0d', accent: '#c8f035', text: '#ffffff' },
+    'Pure Dark':     { bg: '#000000', panel: '#080808', accent: '#ffffff', text: '#ffffff' },
+    'Light':         { bg: '#f5f5f3', panel: '#ffffff', accent: '#2c5cff', text: '#000000' },
+    'Synthwave':     { bg: '#150024', panel: '#1d0033', accent: '#ff2bd6', text: '#ffdcff' },
+    'Forest':        { bg: '#0d1410', panel: '#121b16', accent: '#b8d97d', text: '#e8f0dc' },
+    'Solar Flare':   { bg: '#1a0a05', panel: '#22100a', accent: '#ff7a30', text: '#ffe6d2' },
+};
+const THEME_NAMES  = Object.keys(THEME_SEEDS);
+const DEFAULT_THEME = 'Terminal Noir';
+const THEME_KEY        = 'theme-name';
+const THEME_CUSTOM_KEY = 'theme-custom-seed';
+const THEME_ICON_PREFIX = 'theme-icon:'; // per-theme override; absent = auto-derive
+
+function applyThemeVars(vars) {
+    const root = document.documentElement;
+    for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
+}
+function _activeThemeName() {
+    return localStorage.getItem(THEME_KEY) || DEFAULT_THEME;
+}
+// Returns 1 if icons should render dark (black on a light theme), 0 for light
+// (white on dark themes). Per-theme override via THEME_ICON_PREFIX; absent
+// falls back to auto-derive from the theme's background luminance.
+function _resolveIconInvert(seed, themeName = _activeThemeName()) {
+    const mode = localStorage.getItem(THEME_ICON_PREFIX + themeName);
+    if (mode === 'dark')  return 1;
+    if (mode === 'light') return 0;
+    return _isLight(seed.bg) ? 1 : 0;
+}
+function applyIconMode(seed) {
+    const dark = _resolveIconInvert(seed) === 1;
+    document.documentElement.style.setProperty('--icon-color', dark ? '#000000' : '#ffffff');
+}
+function _applyColorScheme(seed) {
+    document.documentElement.style.colorScheme = _isLight(seed.bg) ? 'light' : 'dark';
+}
+function applyThemeByName(name) {
+    const seed = THEME_SEEDS[name] || THEME_SEEDS[DEFAULT_THEME];
+    // Write THEME_KEY first — applyIconMode resolves the per-theme icon
+    // override by reading the active theme name from localStorage.
+    localStorage.setItem(THEME_KEY, name);
+    applyThemeVars(deriveTheme(seed));
+    applyIconMode(seed);
+    _applyColorScheme(seed);
+}
+function applyCustomTheme(seed) {
+    localStorage.setItem(THEME_KEY, '__custom__');
+    localStorage.setItem(THEME_CUSTOM_KEY, JSON.stringify(seed));
+    applyThemeVars(deriveTheme(seed));
+    applyIconMode(seed);
+    _applyColorScheme(seed);
+}
+function _restoreTheme() {
+    const name = localStorage.getItem(THEME_KEY);
+    if (name === '__custom__') {
+        try {
+            const seed = JSON.parse(localStorage.getItem(THEME_CUSTOM_KEY));
+            if (seed) {
+                applyThemeVars(deriveTheme(seed));
+                applyIconMode(seed);
+                _applyColorScheme(seed);
+                return;
+            }
+        } catch {}
+    }
+    const seed = (name && THEME_SEEDS[name]) ? THEME_SEEDS[name] : THEME_SEEDS[DEFAULT_THEME];
+    applyThemeVars(deriveTheme(seed));
+    applyIconMode(seed);
+    _applyColorScheme(seed);
+}
+_restoreTheme();
+
+function _getActiveSeed() {
+    const name = localStorage.getItem(THEME_KEY) || DEFAULT_THEME;
+    if (name === '__custom__') return _getCurrentCustomSeed();
+    return THEME_SEEDS[name] || THEME_SEEDS[DEFAULT_THEME];
+}
+
+function _getCurrentCustomSeed() {
+    try {
+        const stored = JSON.parse(localStorage.getItem(THEME_CUSTOM_KEY));
+        if (stored && stored.bg) return stored;
+    } catch {}
+    return { ...THEME_SEEDS[DEFAULT_THEME] };
+}
+
+// Inline theme picker — mounts into a given container (no popup wrapping).
+function mountThemePicker(container) {
+    if (!container) return;
+    container.innerHTML = '';
+
+    const currentName = localStorage.getItem(THEME_KEY) || DEFAULT_THEME;
+
+    const grid = document.createElement('div');
+    grid.className = 'theme-grid';
+    container.appendChild(grid);
+
+    let iconCheckbox = null;
+    let customCard   = null;
+
+    const renderCard = (name, seed, isCustom = false) => {
+        const card = document.createElement('div');
+        card.className = 'theme-card';
+        if ((isCustom && currentName === '__custom__') ||
+            (!isCustom && currentName === name)) card.classList.add('selected');
+
+        const swatches = document.createElement('div');
+        swatches.className = 'theme-swatches';
+        ['bg', 'panel', 'accent', 'text'].forEach(k => {
+            const s = document.createElement('div');
+            s.className = 'theme-swatch';
+            s.style.background = seed[k];
+            swatches.appendChild(s);
+        });
+
+        const label = document.createElement('div');
+        label.className = 'theme-card-label';
+        label.textContent = name;
+
+        card.appendChild(swatches);
+        card.appendChild(label);
+        card.addEventListener('click', () => {
+            if (isCustom) applyCustomTheme(seed);
+            else          applyThemeByName(name);
+            grid.querySelectorAll('.theme-card').forEach(c => c.classList.remove('selected'));
+            card.classList.add('selected');
+            if (iconCheckbox) iconCheckbox.checked = _resolveIconInvert(_getActiveSeed()) === 1;
+        });
+        return card;
+    };
+
+    THEME_NAMES.forEach(n => grid.appendChild(renderCard(n, THEME_SEEDS[n])));
+    const customSeed = _getCurrentCustomSeed();
+    customCard = renderCard('Custom', customSeed, true);
+    grid.appendChild(customCard);
+
+    // Icon mode toggle
+    const optsSection = document.createElement('div');
+    optsSection.className = 'theme-custom-editor';
+    const optsTitle = document.createElement('div');
+    optsTitle.className = 'theme-custom-title';
+    optsTitle.textContent = 'Options';
+    optsSection.appendChild(optsTitle);
+
+    const iconRow = document.createElement('label');
+    iconRow.className = 'theme-custom-row theme-checkbox-row';
+    const iconText = document.createElement('span');
+    iconText.textContent = 'Dark icons';
+    iconCheckbox = document.createElement('input');
+    iconCheckbox.type = 'checkbox';
+    iconCheckbox.checked = _resolveIconInvert(_getActiveSeed()) === 1;
+    iconCheckbox.addEventListener('change', () => {
+        localStorage.setItem(
+            THEME_ICON_PREFIX + _activeThemeName(),
+            iconCheckbox.checked ? 'dark' : 'light',
+        );
+        applyIconMode(_getActiveSeed());
+    });
+    iconRow.appendChild(iconText);
+    iconRow.appendChild(iconCheckbox);
+    optsSection.appendChild(iconRow);
+    container.appendChild(optsSection);
+
+    // Custom editor
+    const editor = document.createElement('div');
+    editor.className = 'theme-custom-editor';
+    const editorTitle = document.createElement('div');
+    editorTitle.className = 'theme-custom-title';
+    editorTitle.textContent = 'Customize';
+    editor.appendChild(editorTitle);
+
+    const fields = [
+        ['Background',       'bg'],
+        ['Panel Background', 'panel'],
+        ['Accent',           'accent'],
+        ['Text',             'text'],
+    ];
+    const seedDraft = { ...customSeed };
+    fields.forEach(([label, key]) => {
+        const row = document.createElement('label');
+        row.className = 'theme-custom-row';
+        const text = document.createElement('span');
+        text.textContent = label;
+        const picker = document.createElement('input');
+        picker.type = 'color';
+        picker.value = seedDraft[key];
+        picker.addEventListener('input', () => {
+            seedDraft[key] = picker.value;
+            applyCustomTheme(seedDraft);
+            if (!localStorage.getItem(THEME_ICON_PREFIX + '__custom__')) {
+                iconCheckbox.checked = _isLight(seedDraft.bg);
+            }
+            const swatches = customCard.querySelectorAll('.theme-swatch');
+            swatches[fields.findIndex(f => f[1] === key)].style.background = picker.value;
+            grid.querySelectorAll('.theme-card').forEach(c => c.classList.remove('selected'));
+            customCard.classList.add('selected');
+        });
+        row.appendChild(text);
+        row.appendChild(picker);
+        editor.appendChild(row);
+    });
+    container.appendChild(editor);
+
+    // Reset row
+    const resetRow = document.createElement('div');
+    resetRow.className = 'theme-reset-row';
+    const resetBtn = document.createElement('div');
+    resetBtn.className = 'theme-reset-link';
+    resetBtn.textContent = 'Reset to Default';
+    resetBtn.addEventListener('click', () => {
+        applyThemeByName(DEFAULT_THEME);
+        mountThemePicker(container); // re-render to reflect new selection
+    });
+    resetRow.appendChild(resetBtn);
+    container.appendChild(resetRow);
+}
+
+// Mount inline picker into the Settings panel and wire its collapse header
+const _themeSectionBody   = document.getElementById('theme-section-body');
+const _themeSectionHeader = document.getElementById('theme-section-header');
+if (_themeSectionBody) mountThemePicker(_themeSectionBody);
+if (_themeSectionHeader && _themeSectionBody) {
+    _themeSectionHeader.addEventListener('click', () => {
+        const open = _themeSectionBody.style.display !== 'none';
+        _themeSectionBody.style.display = open ? 'none' : '';
+        const arrow = _themeSectionHeader.querySelector('.prop-section-arrow');
+        if (arrow) arrow.style.transform = open ? 'rotate(-90deg)' : '';
+    });
+}
+
+// ─────────────────────────────────────────────
 //  Scene
 // ─────────────────────────────────────────────
 const canvas  = document.getElementById('three-canvas');
 const builder = new SceneBuilder(canvas);
+// Expose for gl-ui.js (separate module) to toggle the gizmo overlay
+window.__SCENE_BUILDER__ = builder;
 
 // ─────────────────────────────────────────────
 //  Audio
@@ -149,7 +432,15 @@ let startTime    = 0;
 let pauseTime    = 0;
 let isPlaying    = false;
 let isDragging   = false;
-let Volume       = 1;
+const VOLUME_KEY = 'audio-volume-pref';
+let Volume = (() => {
+    try {
+        const v = parseFloat(localStorage.getItem(VOLUME_KEY));
+        if (!isNaN(v) && v >= 0 && v <= 3) return v;
+    } catch {}
+    return 1;
+})();
+listener.setMasterVolume(Volume);
 let allTracks    = [];   // { id, file, name, ... } in display order
 let currentTrackId = null;
 const customCatalogues = { hdri: [], bg: [], video: [] }; // { name, dataURL } — persisted in global layer
@@ -225,7 +516,6 @@ function serializeAll() {
     return [
         { id: 'global', name: 'Global', isGlobal: true, objects: [], ppLayers: globalPPLayers,
           bgColor: builder._bgColor, hdri: builder.selectedHDRI,
-          volume: Volume,
           syncedVideoObjId,
           glLayout: window.__GL_LAYOUT_JSON__ ?? null,
           customCatalogues, animatedProperties },
@@ -276,12 +566,7 @@ async function deserializeAll(data) {
         const el = document.getElementById('scene-hdri');
         if (el) el.value = globalEntry.hdri;
     }
-    if (typeof globalEntry?.volume === 'number') {
-        Volume = globalEntry.volume;
-        listener.setMasterVolume(Volume);
-        const v = document.getElementById('audio-volume');
-        if (v) v.value = Volume;
-    }
+    // Volume is a global user preference now (localStorage), no longer per-project
     syncedVideoObjId = globalEntry?.syncedVideoObjId ?? null;
 
     if (globalEntry?.glLayout && typeof window.applyGLLayout === 'function') {
@@ -1212,8 +1497,10 @@ function _drawWaveformPreview() {
         progress = Math.max(0, Math.min(1, cur / audioBuffer.duration));
     }
 
-    // Unplayed portion in dark grey
-    ctx.fillStyle = '#3a3a3a';
+    // Unplayed portion uses theme-aware muted text colour
+    const rootStyle = getComputedStyle(document.documentElement);
+    const muted = rootStyle.getPropertyValue('--text-dim').trim() || '#3a3a3a';
+    ctx.fillStyle = muted;
     buildPath();
     ctx.fill();
 
@@ -1851,6 +2138,48 @@ function addPPLayerElement(ppLayer) {
     el.classList.add('list-button');
     el.style.justifyContent = 'space-between';
     el.dataset.ppLayerId = ppLayer.id;
+    el.draggable = true;
+
+    el.addEventListener('dragstart', (e) => {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('application/x-pp-layer', ppLayer.id);
+        el.classList.add('drag-source');
+    });
+    el.addEventListener('dragend', () => {
+        el.classList.remove('drag-source');
+        document.querySelectorAll(
+            '#pp-layer-list .drag-over-above, #pp-layer-list .drag-over-below'
+        ).forEach(x => x.classList.remove('drag-over-above', 'drag-over-below'));
+    });
+    el.addEventListener('dragover', (e) => {
+        if (!e.dataTransfer.types.includes('application/x-pp-layer')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        const rect = el.getBoundingClientRect();
+        const above = (e.clientY - rect.top) < rect.height / 2;
+        el.classList.toggle('drag-over-above',  above);
+        el.classList.toggle('drag-over-below', !above);
+    });
+    el.addEventListener('dragleave', () => {
+        el.classList.remove('drag-over-above', 'drag-over-below');
+    });
+    el.addEventListener('drop', (e) => {
+        const srcId = e.dataTransfer.getData('application/x-pp-layer');
+        if (!srcId || srcId === ppLayer.id) return;
+        e.preventDefault();
+        el.classList.remove('drag-over-above', 'drag-over-below');
+        const rect = el.getBoundingClientRect();
+        const above = (e.clientY - rect.top) < rect.height / 2;
+        const srcIdx = ctx.layers.findIndex(l => l.id === srcId);
+        if (srcIdx < 0) return;
+        const [moved] = ctx.layers.splice(srcIdx, 1);
+        let dstIdx = ctx.layers.findIndex(l => l.id === ppLayer.id);
+        if (dstIdx < 0) dstIdx = ctx.layers.length;
+        ctx.layers.splice(above ? dstIdx : dstIdx + 1, 0, moved);
+        ctx.pipeline.layers = ctx.layers;
+        renderPPLayerList();
+        saveAllToDB();
+    });
 
     const name = document.createElement('span');
     name.textContent = ppLayer.name;
@@ -2051,24 +2380,7 @@ function refreshCounters() {
 function renderLayerList() {
     const container = document.getElementById('layer-list');
     container.innerHTML = '';
-
-    if (currentTab === 'pp') {
-        // Global PP button — sits above scene layers, no reorder/remove
-        const globalEl = document.createElement('div');
-        globalEl.classList.add('list-button', 'layer-item');
-        if (ppContextId === 'global') globalEl.classList.add('selected');
-        globalEl.dataset.layerId = 'global';
-
-        const content = document.createElement('div');
-        content.classList.add('layer-content');
-        const name = document.createElement('div');
-        name.textContent = 'Global';
-        content.appendChild(name);
-        globalEl.appendChild(content);
-        globalEl.addEventListener('click', () => switchPPContext('global'));
-        container.appendChild(globalEl);
-    }
-
+    // Global is PP-only — accessible from the PP editor's Global pill, not here.
     for (const layer of builder.layers) addLayerElement(layer);
     refreshCounters();
 }
@@ -2077,6 +2389,62 @@ function addLayerElement(layer) {
     const el = document.createElement('div');
     el.classList.add('list-button', 'layer-item');
     el.dataset.layerId = layer.id;
+    // Only non-base layers can be dragged; base is always anchored at idx 0
+    el.draggable = !layer.isBase;
+
+    el.addEventListener('dragstart', (e) => {
+        if (layer.isBase) { e.preventDefault(); return; }
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('application/x-layer', layer.id);
+        el.classList.add('drag-source');
+    });
+    el.addEventListener('dragend', () => {
+        el.classList.remove('drag-source');
+        document.querySelectorAll(
+            '#layer-list .drag-over-above, #layer-list .drag-over-below, #layer-list .drag-over-into'
+        ).forEach(x => x.classList.remove(
+            'drag-over-above', 'drag-over-below', 'drag-over-into'));
+    });
+    el.addEventListener('dragover', (e) => {
+        const types = e.dataTransfer.types;
+        if (types.includes('application/x-layer')) {
+            if (layer.isBase) return; // can't drop a layer above the base
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const rect = el.getBoundingClientRect();
+            const above = (e.clientY - rect.top) < rect.height / 2;
+            el.classList.toggle('drag-over-above',  above);
+            el.classList.toggle('drag-over-below', !above);
+        } else if (types.includes('application/x-object')) {
+            // Accept; concrete type-validation happens on drop (getData
+            // is restricted to drop-time for security).
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            el.classList.add('drag-over-into');
+        }
+    });
+    el.addEventListener('dragleave', () => {
+        el.classList.remove('drag-over-above', 'drag-over-below', 'drag-over-into');
+    });
+    el.addEventListener('drop', (e) => {
+        el.classList.remove('drag-over-above', 'drag-over-below', 'drag-over-into');
+        const objPayload = _tryParseObjectDrag(e);
+        if (objPayload) {
+            e.preventDefault();
+            if (objPayload.sourceLayerId === layer.id) return;
+            if (!_layerAcceptsObject(layer, objPayload.objectType)) return;
+            moveObjectToLayer(objPayload.sourceLayerId, layer, objPayload.objectId);
+            return;
+        }
+        const srcLayerId = e.dataTransfer.getData('application/x-layer');
+        if (srcLayerId && srcLayerId !== layer.id) {
+            e.preventDefault();
+            if (layer.isBase) return;
+            const rect = el.getBoundingClientRect();
+            const above = (e.clientY - rect.top) < rect.height / 2;
+            reorderLayerInBuilder(srcLayerId, layer.id, above);
+        }
+    });
 
     const content = document.createElement('div');
     content.classList.add('layer-content');
@@ -2256,8 +2624,53 @@ function renderObjectList(layer) {
         row.classList.add('list-button');
         row.style.justifyContent = 'space-between';
         row.dataset.objectId = obj.id;
+        row.draggable = true;
 
         row.addEventListener('click', () => selectObject(obj, layer));
+
+        // Drag-reorder (same-layer) + source for cross-layer drops on layer rows
+        row.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('application/x-object', JSON.stringify({
+                objectId: obj.id,
+                sourceLayerId: layer.id,
+                objectType: obj.type,
+            }));
+            // Fallback so older drop handlers / dev tools still see something
+            e.dataTransfer.setData('text/plain', obj.id);
+            row.classList.add('drag-source');
+        });
+        row.addEventListener('dragend', () => {
+            row.classList.remove('drag-source');
+            document.querySelectorAll(
+                '.drag-over-above, .drag-over-below, .drag-over-into'
+            ).forEach(el => el.classList.remove(
+                'drag-over-above', 'drag-over-below', 'drag-over-into'));
+        });
+        row.addEventListener('dragover', (e) => {
+            if (!e.dataTransfer.types.includes('application/x-object')) return;
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            const rect = row.getBoundingClientRect();
+            const above = (e.clientY - rect.top) < rect.height / 2;
+            row.classList.toggle('drag-over-above',  above);
+            row.classList.toggle('drag-over-below', !above);
+        });
+        row.addEventListener('dragleave', () => {
+            row.classList.remove('drag-over-above', 'drag-over-below');
+        });
+        row.addEventListener('drop', (e) => {
+            const payload = _tryParseObjectDrag(e);
+            if (!payload) return;
+            e.preventDefault();
+            row.classList.remove('drag-over-above', 'drag-over-below');
+            // Cross-layer drops are handled by layer rows, not here
+            if (payload.sourceLayerId !== layer.id) return;
+            if (payload.objectId === obj.id) return;
+            const rect = row.getBoundingClientRect();
+            const above = (e.clientY - rect.top) < rect.height / 2;
+            reorderObjectInLayer(layer, payload.objectId, obj.id, above);
+        });
 
         const label = document.createElement('span');
         label.textContent = obj.name;
@@ -2291,6 +2704,66 @@ function renderObjectList(layer) {
         row.appendChild(btnGroup);
         listEl.appendChild(row);
     }
+}
+
+function reorderObjectInLayer(layer, srcId, dstId, dropAbove) {
+    const srcIdx = layer.objects.findIndex(o => o.id === srcId);
+    if (srcIdx < 0) return;
+    const [moved] = layer.objects.splice(srcIdx, 1);
+    let dstIdx = layer.objects.findIndex(o => o.id === dstId);
+    if (dstIdx < 0) dstIdx = layer.objects.length;
+    layer.objects.splice(dropAbove ? dstIdx : dstIdx + 1, 0, moved);
+    renderObjectList(layer);
+    saveAllToDB();
+}
+
+function _tryParseObjectDrag(e) {
+    try {
+        const raw = e.dataTransfer.getData('application/x-object');
+        if (!raw) return null;
+        return JSON.parse(raw);
+    } catch { return null; }
+}
+
+// Each object type is only allowed on certain layer kinds — mirrors the
+// "Add X" button gating in selectLayer.
+function _layerAcceptsObject(layer, objType) {
+    if (objType === 'wave')                        return true;
+    if (objType === 'image' || objType === 'fill') return !!layer.isBase;
+    return !layer.isBase; // model, pointLight
+}
+
+function moveObjectToLayer(srcLayerId, dstLayer, objectId) {
+    if (srcLayerId === dstLayer.id) return false;
+    const ok = builder.moveObjectBetweenLayers(srcLayerId, dstLayer.id, objectId);
+    if (!ok) return false;
+    // If the moved object was the active selection, refresh the gizmo / property
+    // panel against its new layer
+    if (selectedObject && selectedObject.id === objectId) {
+        builder.detachGizmo();
+        builder.attachGizmo(selectedObject, saveAllToDB, () => _gizmoLiveRefresh?.());
+        renderObjectProperties(selectedObject, dstLayer);
+    }
+    renderLayerList();
+    const cur = builder.layers.find(l => l.id === currentSelectedLayerId);
+    if (cur) renderObjectList(cur);
+    saveAllToDB();
+    return true;
+}
+
+function reorderLayerInBuilder(srcId, dstId, dropAbove) {
+    const list = builder.layers;
+    const srcIdx = list.findIndex(l => l.id === srcId);
+    if (srcIdx < 0) return;
+    if (list[srcIdx].isBase) return; // base never moves
+    const [moved] = list.splice(srcIdx, 1);
+    let dstIdx = list.findIndex(l => l.id === dstId);
+    if (dstIdx < 0) dstIdx = list.length;
+    let insertAt = dropAbove ? dstIdx : dstIdx + 1;
+    if (insertAt < 1) insertAt = 1; // never above the base layer
+    list.splice(insertAt, 0, moved);
+    renderLayerList();
+    saveAllToDB();
 }
 
 // ─────────────────────────────────────────────
@@ -3007,10 +3480,12 @@ document.getElementById('pause-btn').addEventListener('click', () => {
     isPlaying ? pauseAudio() : resumeAudio();
 });
 
-document.getElementById('audio-volume').addEventListener('input', (e) => {
+const _volumeSlider = document.getElementById('audio-volume');
+if (_volumeSlider) _volumeSlider.value = Volume;
+_volumeSlider?.addEventListener('input', (e) => {
     Volume = parseFloat(e.target.value);
     listener.setMasterVolume(Volume);
-    saveAllToDB();
+    try { localStorage.setItem(VOLUME_KEY, String(Volume)); } catch {}
 });
 
 let _glLayoutSaveTimer = 0;
@@ -3371,6 +3846,9 @@ function _updateAudioMonitor(ad) {
     if (!ad || !_audioMonitorEls.monitor) return;
     if (_audioMonitorEls.monitor.offsetParent === null) return; // window closed / stashed
 
+    const accent = getComputedStyle(document.documentElement)
+        .getPropertyValue('--accent').trim() || '#c8f035';
+
     const sc = _audioMonitorEls.spectrum;
     if (sc && ad.freqData) {
         const ctx2 = sc.getContext('2d');
@@ -3385,7 +3863,7 @@ function _updateAudioMonitor(ad) {
         const logMin = Math.log(minBin);
         const logMax = Math.log(maxBin);
         const bw = w / NBars;
-        ctx2.fillStyle = '#c8f035';
+        ctx2.fillStyle = accent;
         for (let i = 0; i < NBars; i++) {
             const a = Math.exp(logMin + (logMax - logMin) * (i / NBars));
             const b = Math.exp(logMin + (logMax - logMin) * ((i + 1) / NBars));
@@ -3404,7 +3882,7 @@ function _updateAudioMonitor(ad) {
         const ctx2 = wf.getContext('2d');
         const w = wf.width, h = wf.height;
         ctx2.clearRect(0, 0, w, h);
-        ctx2.strokeStyle = '#c8f035';
+        ctx2.strokeStyle = accent;
         ctx2.lineWidth = 1;
         ctx2.beginPath();
         const N = ad.timeData.length;
@@ -3456,5 +3934,224 @@ document.addEventListener('visibilitychange', () => {
         builder.renderer.setAnimationLoop(null);
     } else {
         builder.renderer.setAnimationLoop(animate);
+    }
+});
+
+// ─────────────────────────────────────────────
+//  Command palette  (Ctrl+K / Cmd+K)
+//  Fuzzy-filtered list of every reachable action — file menu items,
+//  tab switches, theme presets, layers, objects in the current layer.
+// ─────────────────────────────────────────────
+function _cmdFuzzyMatch(query, text) {
+    if (!query) return true;
+    const q = query.toLowerCase();
+    const t = text.toLowerCase();
+    // 1. exact substring wins
+    if (t.includes(q)) return true;
+    // 2. otherwise: every char of q appears in t in order
+    let qi = 0;
+    for (let i = 0; i < t.length && qi < q.length; i++) {
+        if (t[i] === q[qi]) qi++;
+    }
+    return qi === q.length;
+}
+
+function _buildCommandList() {
+    const cmds = [];
+    const add = (group, label, run) => cmds.push({ group, label, run });
+
+    add('File', 'New Project',         () => document.getElementById('file-new')?.click());
+    add('File', 'Open Project…',       () => document.getElementById('file-open')?.click());
+    add('File', 'Save Project',        () => document.getElementById('file-save')?.click());
+    add('File', 'Load Preset…',        () => showPresetPicker({ canDismiss: true }));
+    add('File', 'Resources…',          () => showResourcesPopup());
+    add('Help', 'About',               () => document.getElementById('about-btn')?.click());
+    add('Help', 'Open Documentation',  () => window.open('docs/', '_blank', 'noopener'));
+
+    THEME_NAMES.forEach(n => add('Theme', `Apply theme: ${n}`, () => applyThemeByName(n)));
+
+    builder.layers.forEach(l => add('Layer', `Select layer: ${l.name}`,
+        () => { selectLayer(l); switchTab('oe'); }));
+
+    const layer = currentSelectedLayerId
+        ? builder.layers.find(l => l.id === currentSelectedLayerId) : null;
+    if (layer) {
+        layer.objects.forEach(o => add('Object', `Select object: ${o.name}`,
+            () => { selectObject(o, layer); switchTab('oe'); }));
+    }
+
+    return cmds;
+}
+
+function showCommandPalette() {
+    if (document.getElementById('cmd-palette-bg')) return;
+
+    const cmds = _buildCommandList();
+
+    const bg = document.createElement('div');
+    bg.className = 'popup-bg cmd-palette-bg';
+    bg.id = 'cmd-palette-bg';
+
+    const panel = document.createElement('div');
+    panel.className = 'cmd-palette';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'cmd-palette-input';
+    input.placeholder = 'Type to filter — ↑↓ navigate, Enter run, Esc close';
+
+    const list = document.createElement('div');
+    list.className = 'cmd-palette-list';
+
+    panel.appendChild(input);
+    panel.appendChild(list);
+    bg.appendChild(panel);
+
+    let filtered = cmds.slice();
+    let selected = 0;
+
+    const close = () => bg.remove();
+
+    const updateSelection = () => {
+        const rows = list.querySelectorAll('.cmd-palette-row');
+        rows.forEach((el, i) => el.classList.toggle('selected', i === selected));
+        const selEl = rows[selected];
+        if (selEl) selEl.scrollIntoView({ block: 'nearest' });
+    };
+
+    const render = () => {
+        list.innerHTML = '';
+        if (filtered.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'cmd-palette-empty';
+            empty.textContent = 'No matches';
+            list.appendChild(empty);
+            return;
+        }
+        filtered.forEach((c, i) => {
+            const row = document.createElement('div');
+            row.className = 'cmd-palette-row';
+            if (i === selected) row.classList.add('selected');
+            const g = document.createElement('span');
+            g.className = 'cmd-palette-group';
+            g.textContent = c.group;
+            const lbl = document.createElement('span');
+            lbl.className = 'cmd-palette-label';
+            lbl.textContent = c.label;
+            row.appendChild(g);
+            row.appendChild(lbl);
+            row.addEventListener('mouseenter', () => { selected = i; updateSelection(); });
+            row.addEventListener('mousedown',  (e) => {
+                e.preventDefault(); // keep focus in input
+                c.run(); close();
+            });
+            list.appendChild(row);
+        });
+    };
+
+    const filter = () => {
+        const q = input.value.trim();
+        filtered = cmds.filter(c => _cmdFuzzyMatch(q, c.label) || _cmdFuzzyMatch(q, c.group));
+        selected = 0;
+        render();
+    };
+
+    input.addEventListener('input', filter);
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (filtered.length === 0) return;
+            selected = (selected + 1) % filtered.length;
+            updateSelection();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (filtered.length === 0) return;
+            selected = (selected - 1 + filtered.length) % filtered.length;
+            updateSelection();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const c = filtered[selected];
+            if (c) { c.run(); close(); }
+        }
+    });
+
+    bg.addEventListener('click', (e) => { if (e.target === bg) close(); });
+    document.body.appendChild(bg);
+
+    render();
+    setTimeout(() => input.focus(), 0);
+}
+
+window.addEventListener('keydown', (e) => {
+    // Don't trigger when typing into a form control or another popup is open
+    const tag = e.target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
+    if (document.querySelector('.popup-bg')) return;
+
+    const ctrlK = (e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey
+        && e.key.toLowerCase() === 'k';
+    const bareSpace = e.key === ' ' && !e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey;
+    if (ctrlK || bareSpace) {
+        e.preventDefault();
+        showCommandPalette();
+    }
+});
+
+// ─────────────────────────────────────────────
+//  Delete shortcut — removes the currently active element based on the
+//  active editor tab. Object Editor: selected object > selected non-base
+//  layer. Post Processing: selected PP layer. Background layer is never
+//  delete-able (it's structural).
+// ─────────────────────────────────────────────
+window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Delete') return;
+    const tag = e.target?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || e.target?.isContentEditable) return;
+    if (document.querySelector('.popup-bg')) return;
+
+    if (currentTab === 'pp') {
+        const sel = document.querySelector('#pp-layer-list .list-button.selected');
+        const id  = sel?.dataset.ppLayerId;
+        if (!id) return;
+        const ctx = getPPContext();
+        if (!ctx) return;
+        ctx.layers = ctx.layers.filter(l => l.id !== id);
+        ctx.pipeline.layers = ctx.layers;
+        if (ppContextId !== 'global' && ctx.layers.length === 0) {
+            builder.setLayerPPPipeline(ppContextId, null);
+        }
+        renderPPLayerList();
+        document.getElementById('pp-layer-properties').innerHTML = '';
+        saveAllToDB();
+        e.preventDefault();
+        return;
+    }
+
+    // Object Editor (and Animation falls through to the same selection)
+    if (selectedObject) {
+        const layer = builder.layers.find(l => l.objects?.some(o => o.id === selectedObject.id));
+        if (!layer) return;
+        const id = selectedObject.id;
+        selectedObject = null;
+        document.getElementById('object-properties').innerHTML = '';
+        builder.removeObjectFromLayer(layer.id, id);
+        renderObjectList(layer);
+        saveAllToDB();
+        e.preventDefault();
+        return;
+    }
+
+    if (currentSelectedLayerId) {
+        const layer = builder.layers.find(l => l.id === currentSelectedLayerId);
+        if (!layer || layer.isBase) return; // base is structural, never deleted
+        builder.removeLayer(layer.id);
+        currentSelectedLayerId = null;
+        selectedObject = null;
+        document.getElementById('object-properties').innerHTML = '';
+        document.getElementById('object-list').innerHTML = '';
+        renderLayerList();
+        saveAllToDB();
+        e.preventDefault();
     }
 });

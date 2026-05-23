@@ -57,6 +57,28 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         const gizmoSwitch = document.getElementById('gizmo-mode-switch');
         if (gizmoSwitch) viewportHost.appendChild(gizmoSwitch);
 
+        // Fullscreen toggle — overlays the viewport. In fullscreen the gizmo
+        // overlay (TransformControls) and gizmo-mode chip are hidden so the
+        // render is clean. Esc / native exit triggers `fullscreenchange`.
+        const fsBtn = document.createElement('div');
+        fsBtn.id = 'viewport-fullscreen-btn';
+        fsBtn.className = 'viewport-overlay-btn';
+        fsBtn.title = 'Fullscreen viewport';
+        fsBtn.textContent = '⛶';
+        fsBtn.addEventListener('click', () => {
+            const inFs = document.fullscreenElement === viewportHost;
+            if (inFs) document.exitFullscreen?.();
+            else      viewportHost.requestFullscreen?.();
+        });
+        viewportHost.appendChild(fsBtn);
+        document.addEventListener('fullscreenchange', () => {
+            const active = document.fullscreenElement === viewportHost;
+            viewportHost.classList.toggle('viewport-fullscreen', active);
+            const sb = window.__SCENE_BUILDER__;
+            sb?.setGizmoVisible?.(!active);
+            fsBtn.textContent = active ? '⤬' : '⛶';
+        });
+
         // Outliner host: layers + object-list (object-list is plucked out of #current-layer-controls)
         const outlinerHost = document.createElement('div');
         outlinerHost.id = 'outliner-host';
@@ -75,7 +97,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         // ── Component definitions ─────────────────────────
         const COMPONENTS = {
             'viewport':        { title: 'Viewport',        hostId: 'viewport-host' },
-            'saved-tracks':    { title: 'Audio Source',    hostId: 'player' },
+            'saved-tracks':    { title: 'Audio Input',    hostId: 'player' },
             'outliner':        { title: 'Outliner',        hostId: 'outliner-host' },
             'object-editor':   { title: 'Object Editor',   hostId: 'current-layer-controls' },
             'post-processing': { title: 'Post Processing', hostId: 'pp-section' },
@@ -141,7 +163,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
                         type: 'column',
                         content: [
                             { type: 'component', componentType: 'outliner',     title: 'Outliner' },
-                            { type: 'component', componentType: 'saved-tracks', title: 'Audio Source' }
+                            { type: 'component', componentType: 'saved-tracks', title: 'Audio Input' }
                         ]
                     },
                     {

@@ -8,4 +8,16 @@ description: All keys.
 | `T` | Gizmo: Move |
 | `R` | Gizmo: Rotate |
 | `S` | Gizmo: Scale |
-| `Space` | Play / pause audio |
+| `Space` or `Ctrl + K` / `⌘ + K` | Open command palette |
+| `Delete` | Delete active element (object > selected layer in Object Editor, selected effect in Post Processing) |
+
+## Command palette
+
+`Space` (or `Ctrl + K`) opens a top-aligned search field with every reachable action: file menu items, theme presets, every layer in the scene, and every object in the currently selected layer. Type to fuzzy-match, `↑↓` to navigate, `Enter` to run, `Esc` or click-outside to close. The palette is suppressed while another modal or form input has focus.
+
+## Reordering and moving via drag
+
+- **Layers** — drag a layer row in the Layers panel to reorder. A coloured bar shows above / below the drop target. The base layer (Background) is anchored at the top and cannot move.
+- **Objects within a layer** — drag any row in the object list. Same drop-bar UX.
+- **Objects across layers** — drag an object row onto a layer row in the Layers panel. The destination row highlights with an accent outline if the layer accepts that object type (e.g. models / lights go to non-base layers, fills/images go to the base layer, waves go anywhere). Mismatched targets are rejected silently.
+- **Post-processing layers** — drag a row in the PP layer list to reorder the effect stack. Works for both Global and per-layer pipelines.

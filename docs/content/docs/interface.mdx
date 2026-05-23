@@ -24,6 +24,24 @@ Preset thumbnails are rendered live the first time you open the picker (the app 
 - **Windows ▾** — toggle individual panels (Viewport, Layers, Properties, Animation, Audio Monitor).
 - **Layout ▾** — reset the panel layout. Drag any tab to dock it as a new pane (powered by Golden Layout).
 
+## Fullscreen viewport
+
+The viewport panel has a `⛶` overlay button in the top-right corner. Click it to enter fullscreen — the gizmo overlay (TransformControls) and the gizmo-mode chip are hidden, and the letterbox / fixed-aspect frame expands to the full element so you get a clean render. Press `Esc` or click the same button to exit.
+
+## Theme
+
+In the **Settings** panel, open the collapsible **Theme** section. The picker is inline — six preset cards (**Terminal Noir** default, **Pure Dark**, **Light**, **Synthwave**, **Forest**, **Solar Flare**) plus a **Custom** card. Click a card to apply immediately.
+
+Every CSS variable (border alphas, scrollbar colour, grain overlay, hover lifts, panel-glass tint) is derived from the seed's `bg / panel / accent / text` colours, so adding a new theme is just four hex values.
+
+Below the cards: **Dark icons** checkbox (auto-derives from background luminance by default; manual override remembered per theme) and a **Customize** section with live colour pickers feeding the Custom card.
+
+Theme choice persists in `localStorage` (`theme-name` + per-theme `theme-icon:{name}`) and applies before first paint on reload.
+
+## Audio Volume
+
+The volume slider in the Settings / Controls panel is a **global preference** stored in `localStorage` (`audio-volume-pref`). It is not part of a project file — loading a different project does not change your output level.
+
 ## Gizmo
 
 When a 3D object is selected, the transform gizmo appears in the viewport. Switch modes from the top-center pill or with the keyboard.

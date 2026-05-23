@@ -73,18 +73,39 @@ export class SceneBuilder {
         this.renderer.setClearColor(0x000000, 1);
         this.renderer.autoClear = false;
 
-        const _onResize = () => {
+        // Resize is split into two phases to avoid flicker during drag-resize:
+        //
+        //   1. Cheap pass (rAF-coalesced): update camera aspect + renderer
+        //      drawing buffer. The canvas stays the correct size every frame.
+        //   2. Heavy pass (debounced ~120ms): recreate every render target /
+        //      PP ping-pong FBO. setSize on a WebGLRenderTarget recreates its
+        //      GPU texture, and reading from a freshly-recreated FBO before
+        //      it has been drawn into is the flicker source. Defer until the
+        //      drag settles; until then layer textures stretch slightly.
+        let _rafResizeScheduled = false;
+        let _rtResizeTimer = null;
+        const _cheapResize = () => {
             const m = _measure();
             this.width  = m.w;
             this.height = m.h;
             this.camera.aspect = this.width / this.height;
             this.camera.updateProjectionMatrix();
             this.renderer.setSize(this.width, this.height, false);
+        };
+        const _heavyResize = () => {
             this._layerTargets.forEach(t => t.setSize(this.width, this.height));
             this._finalTarget.setSize(this.width, this.height);
             this._layerPPTarget.setSize(this.width, this.height);
             this._postPipeline?.resize(this.width, this.height);
             this._layerPPPipelines.forEach(p => p.resize(this.width, this.height));
+        };
+        const _onResize = () => {
+            if (!_rafResizeScheduled) {
+                _rafResizeScheduled = true;
+                requestAnimationFrame(() => { _rafResizeScheduled = false; _cheapResize(); });
+            }
+            if (_rtResizeTimer) clearTimeout(_rtResizeTimer);
+            _rtResizeTimer = setTimeout(_heavyResize, 120);
         };
         window.addEventListener('resize', _onResize);
         if (typeof ResizeObserver !== 'undefined') {
@@ -294,6 +315,24 @@ export class SceneBuilder {
         const obj = layer.getObject(objectId);
         if (obj?.threeObject) this._layerScenes.get(layerId)?.remove(obj.threeObject);
         layer.removeObject(objectId);
+    }
+
+    // Move a SceneObject between layers without rebuilding it: re-parent the
+    // existing threeObject in the per-layer Scenes and shuffle the array refs.
+    moveObjectBetweenLayers(srcLayerId, dstLayerId, objectId) {
+        if (srcLayerId === dstLayerId) return false;
+        const src = this.getLayer(srcLayerId);
+        const dst = this.getLayer(dstLayerId);
+        if (!src || !dst) return false;
+        const obj = src.getObject(objectId);
+        if (!obj) return false;
+        if (obj.threeObject) {
+            this._layerScenes.get(srcLayerId)?.remove(obj.threeObject);
+            this._layerScenes.get(dstLayerId)?.add(obj.threeObject);
+        }
+        src.removeObject(objectId);
+        dst.addObject(obj);
+        return true;
     }
 
     // ─────────────────────────────────────────
@@ -899,12 +938,17 @@ export class SceneBuilder {
             this.renderer.render(this._compositeScene, this._compositeCamera);
         }
 
-        // 3. Gizmo overlay — always on top, after PP
-        if (this._transformControls.object) {
+        // 3. Gizmo overlay — always on top, after PP. Suppressed in fullscreen
+        // viewport mode so the user can see a clean render.
+        if (!this._gizmoHidden && this._transformControls.object) {
             this.renderer.setRenderTarget(null);
             this.renderer.clearDepth();
             this.renderer.render(this._gizmoScene, this.camera);
         }
+    }
+
+    setGizmoVisible(visible) {
+        this._gizmoHidden = !visible;
     }
 
     _updateModel(modelObj, time) {
