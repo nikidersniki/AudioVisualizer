@@ -73,7 +73,9 @@ export async function generateMaterialPreviews() {
 //  Model previews — each catalogue model, normal material
 // ─────────────────────────────────────────────
 function loadModelForPreview(entry) {
-    const loader = entry.path.endsWith('.fbx') ? new FBXLoader() : new OBJLoader();
+    // `format` is set on uploaded models (data URLs have no extension).
+    const fmt = entry.format ?? (entry.path?.toLowerCase().endsWith('.obj') ? 'obj' : 'fbx');
+    const loader = fmt === 'obj' ? new OBJLoader() : new FBXLoader();
     return new Promise((resolve, reject) => {
         loader.load(entry.path, object => {
             object.scale.set(...entry.scale);

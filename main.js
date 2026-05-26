@@ -443,7 +443,7 @@ let Volume = (() => {
 listener.setMasterVolume(Volume);
 let allTracks    = [];   // { id, file, name, ... } in display order
 let currentTrackId = null;
-const customCatalogues = { hdri: [], bg: [], video: [] }; // { name, dataURL } — persisted in global layer
+const customCatalogues = { hdri: [], bg: [], video: [], model: [] }; // hdri/bg/video: { name, dataURL }; model: { name, dataURL, format, scale } — persisted in global layer
 let animatedProperties = []; // [{ objectId, key, label }] — persisted in global layer
 let animTab = 'obj'; // 'obj' | 'pp'
 const _animBtnRefreshers = []; // refresh fns for currently rendered property-panel animate buttons
@@ -544,9 +544,11 @@ async function deserializeAll(data) {
         customCatalogues.hdri  = [];
         customCatalogues.bg    = [];
         customCatalogues.video = [];
+        customCatalogues.model = [];
         for (const e of (saved.hdri  ?? [])) _registerCustomHDRI(e.name,  e.dataURL);
         for (const e of (saved.bg    ?? [])) _registerCustomBG(e.name,    e.dataURL);
         for (const e of (saved.video ?? [])) _registerCustomVideo(e.name, e.dataURL);
+        for (const e of (saved.model ?? [])) _registerCustomModel(e.name, e.dataURL, e.format, e.scale);
     }
 
     await builder.loadFromJSON(sceneLayers);
@@ -617,6 +619,14 @@ function _registerCustomVideo(name, dataURL) {
     if (PRESETS.VIDEO_CATALOGUE.find(e => e.name === name)) return;
     PRESETS.VIDEO_CATALOGUE.push({ name, path: dataURL });
     customCatalogues.video.push({ name, dataURL });
+}
+
+function _registerCustomModel(name, dataURL, format, scale) {
+    if (PRESETS.MODEL_CATALOGUE.find(e => e.name === name)) return;
+    const fmt = (format ?? 'fbx').toLowerCase();
+    const sc  = Array.isArray(scale) && scale.length === 3 ? scale : [0.01, 0.01, 0.01];
+    PRESETS.MODEL_CATALOGUE.push({ name, path: dataURL, scale: sc, format: fmt, isCustom: true });
+    customCatalogues.model.push({ name, dataURL, format: fmt, scale: sc });
 }
 
 function fileToDataURL(file) {
@@ -1096,7 +1106,7 @@ async function loadLayersFromFile(file) {
 // ─────────────────────────────────────────────
 //  Presets / Start Screen
 // ─────────────────────────────────────────────
-const BUILTIN_PRESETS = ['Colors', 'Pulsar', 'Rave', 'Wave'];
+const BUILTIN_PRESETS = ['Blobs', 'Colors', 'Pulsar', 'Rave', 'Wave'];
 const THUMB_W = 320, THUMB_H = 180;
 const THUMB_PREFIX = 'preset-thumb-v1:';
 
@@ -1794,6 +1804,39 @@ async function handleDroppedFile(file) {
         const dataURL = await fileToDataURL(file);
         _registerCustomVideo(name, dataURL);
         saveAllToDB();
+        return;
+    }
+
+    // ── 3D model (.fbx / .obj) ────────────────────────────
+    const lower = (file.name || '').toLowerCase();
+    const isFBX = lower.endsWith('.fbx');
+    const isOBJ = lower.endsWith('.obj');
+    if (isFBX || isOBJ) {
+        const defaultName = file.name.replace(/\.(fbx|obj)$/i, '');
+        let result;
+        try {
+            result = await spawnPopup('Add Model', [
+                ['Name',  'text',   true, defaultName],
+                ['Scale', 'number', false, 0.01],
+            ]);
+        } catch { return; }
+        const { Name: name, Scale: scaleRaw } = result;
+        if (PRESETS.MODEL_CATALOGUE.find(e => e.name === name)) {
+            alert(`Model "${name}" already exists. Pick a different name.`);
+            return;
+        }
+        const s = parseFloat(scaleRaw);
+        const scale = Number.isFinite(s) && s > 0 ? [s, s, s] : [0.01, 0.01, 0.01];
+        const dataURL = await fileToDataURL(file);
+        _registerCustomModel(name, dataURL, isFBX ? 'fbx' : 'obj', scale);
+        modelPreviews = generateModelPreviews();
+        await saveAllToDB();
+        window.dispatchEvent(new CustomEvent('resources-changed'));
+        // Refresh property panel if a model is selected so its picker shows the new entry
+        if (selectedObject?.type === 'model') {
+            const layer = builder.layers.find(l => l.objects?.some(o => o.id === selectedObject.id));
+            if (layer) renderObjectProperties(selectedObject, layer);
+        }
     }
 }
 
@@ -1861,6 +1904,17 @@ function _deleteCustomVideo(name) {
     if (ci >= 0) customCatalogues.video.splice(ci, 1);
     const pi = (PRESETS.VIDEO_CATALOGUE || []).findIndex(e => e.name === name);
     if (pi >= 0) PRESETS.VIDEO_CATALOGUE.splice(pi, 1);
+}
+
+function _deleteCustomModel(name) {
+    const ci = customCatalogues.model.findIndex(e => e.name === name);
+    if (ci >= 0) customCatalogues.model.splice(ci, 1);
+    const pi = PRESETS.MODEL_CATALOGUE.findIndex(e => e.name === name);
+    if (pi >= 0) PRESETS.MODEL_CATALOGUE.splice(pi, 1);
+    // Drop cached three.js clone source so re-uploads with the same name reload
+    if (builder?._modelCache)        delete builder._modelCache[name];
+    if (builder?._modelFBXTextures)  delete builder._modelFBXTextures[name];
+    modelPreviews = generateModelPreviews();
 }
 
 async function _deleteAudioTrack(record) {
@@ -1935,9 +1989,21 @@ function showResourcesPopup() {
         _renderResourceSection(body, 'Video', customCatalogues.video,
             e => e.name,
             async e => { _deleteCustomVideo(e.name); await saveAllToDB(); render(); });
+        _renderResourceSection(body, 'Models', customCatalogues.model,
+            e => `${e.name} (${(e.format ?? 'fbx').toUpperCase()})`,
+            async e => {
+                _deleteCustomModel(e.name);
+                await saveAllToDB();
+                render();
+                if (selectedObject?.type === 'model') {
+                    const layer = builder.layers.find(l => l.objects?.some(o => o.id === selectedObject.id));
+                    if (layer) renderObjectProperties(selectedObject, layer);
+                }
+            });
 
         const total = allTracks.length + customCatalogues.hdri.length
-            + customCatalogues.bg.length + customCatalogues.video.length;
+            + customCatalogues.bg.length + customCatalogues.video.length
+            + customCatalogues.model.length;
         if (total === 0) {
             const empty = document.createElement('div');
             empty.className = 'resources-empty';
@@ -3907,7 +3973,11 @@ function _updateAudioMonitor(ad) {
     }
 }
 
+let _lastFrameTime = 0;
+let _hudUpdateAcc = 0;
 function animate(time) {
+    const dbg = builder._debugEnabled;
+    const t0 = dbg ? performance.now() : 0;
     builder.updateAudioData(analyser, Volume);
     _updateAudioMonitor(builder.audioData);
     for (const fn of _audioInlineMeterUpdaters) fn(builder.audioData);
@@ -3915,7 +3985,33 @@ function animate(time) {
     _drawWaveformPreview();
     _syncVideoToAudio();
     listener.setMasterVolume(Volume);
+    const tAudio = dbg ? performance.now() : 0;
     builder.update(time);
+    if (dbg) {
+        const tEnd = performance.now();
+        const t = builder._timings;
+        const a = 0.1;
+        t.audio = t.audio * (1 - a) + (tAudio - t0) * a;
+        t.frame = t.frame * (1 - a) + (tEnd - t0)   * a;
+        const dt = _lastFrameTime ? (tEnd - _lastFrameTime) : 0;
+        if (dt > 0) t.fps = t.fps * (1 - a) + (1000 / dt) * a;
+        _lastFrameTime = tEnd;
+        _hudUpdateAcc += dt;
+        const hud = window.__DEBUG_HUD__;
+        if (hud && (_hudUpdateAcc >= 100 || !hud.textContent)) {
+            _hudUpdateAcc = 0;
+            const fmt = (v) => v.toFixed(2).padStart(5, ' ');
+            hud.textContent =
+                `fps     ${t.fps.toFixed(1)}\n` +
+                `frame   ${fmt(t.frame)} ms\n` +
+                `audio   ${fmt(t.audio)} ms\n` +
+                `objects ${fmt(t.objects)} ms\n` +
+                `layers  ${fmt(t.layers)} ms\n` +
+                `postFx  ${fmt(t.postFx)} ms\n` +
+                `gizmo   ${fmt(t.gizmo)} ms\n` +
+                `render  ${fmt(t.render)} ms`;
+        }
+    }
 }
 
 builder.renderer.setAnimationLoop(animate);

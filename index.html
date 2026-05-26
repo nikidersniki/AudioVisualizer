@@ -15,7 +15,7 @@
     <header>
       <div id="header-buttons">
         <input type="file" id="file-input" accept=".json" style="display:none">
-        <input type="file" id="resource-input" accept="image/*,video/*,audio/*" multiple style="display:none">
+        <input type="file" id="resource-input" accept="image/*,video/*,audio/*,.fbx,.obj" multiple style="display:none">
         <div id="file-menu" class="Btn-dropdown">
           <div id="file-menu-btn" class="Btn">File ▾</div>
           <div id="file-menu-list">
@@ -100,6 +100,10 @@
               <option value="21:9">21:9</option>
               <option value="1:1">1:1</option>
             </select>
+          </div>
+          <div class="prop-row">
+            <label class="prop-label">Debug HUD</label>
+            <input type="checkbox" id="viewport-debug-toggle">
           </div>
         </div>
       </div>

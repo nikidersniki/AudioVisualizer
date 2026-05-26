@@ -116,6 +116,10 @@ export class SceneBuilder {
         // Must be initialised before any setHDRI / _trackLoad call.
         this._pendingLoads = new Set();
 
+        // ── Debug timings (toggled from viewport settings) ──
+        this._debugEnabled = (typeof localStorage !== 'undefined') && localStorage.getItem('gl-debug-hud') === '1';
+        this._timings = { audio:0, objects:0, layers:0, postFx:0, gizmo:0, render:0, frame:0, fps:0 };
+
         this.selectedHDRI = PRESETS.HDRI_CATALOGUE[0].name;
         this.setHDRI(this.selectedHDRI);
 
@@ -709,8 +713,13 @@ export class SceneBuilder {
         }
     }
 
-    _getLoader(path) {
-        return path.endsWith('.fbx') ? new FBXLoader() : new OBJLoader();
+    _getLoader(entryOrPath) {
+        // Accept either a catalogue entry or a raw path. Data-URL uploads have
+        // no file extension, so prefer an explicit `format` field on the entry.
+        const fmt = typeof entryOrPath === 'object'
+            ? (entryOrPath.format ?? (entryOrPath.path?.toLowerCase().endsWith('.obj') ? 'obj' : 'fbx'))
+            : (String(entryOrPath).toLowerCase().endsWith('.obj') ? 'obj' : 'fbx');
+        return fmt === 'obj' ? new OBJLoader() : new FBXLoader();
     }
 
     // Walk FBX children and harvest any textures baked into the original materials
@@ -743,7 +752,7 @@ export class SceneBuilder {
         let raw = this._modelCache[modelObj.modelName];
         if (!raw) {
             raw = await new Promise((resolve, reject) => {
-                this._getLoader(entry.path).load(entry.path, resolve, undefined, reject);
+                this._getLoader(entry).load(entry.path, resolve, undefined, reject);
             });
             this._modelFBXTextures[modelObj.modelName] = this._extractFBXTextures(raw);
             this._modelCache[modelObj.modelName] = raw;
@@ -882,6 +891,9 @@ export class SceneBuilder {
     //  Per-frame update  (call from animate loop)
     // ─────────────────────────────────────────
     update(time) {
+        const dbg = this._debugEnabled;
+        const t0 = dbg ? performance.now() : 0;
+
         // Update all object state (no rendering yet)
         for (const layer of this.layers) {
             if (!layer.visible) continue;
@@ -892,6 +904,7 @@ export class SceneBuilder {
                 if (obj.type === 'image') this._updateImage(obj, time);
             }
         }
+        const tObj = dbg ? performance.now() : 0;
 
         // 1. Composite all 3D layers → _finalTarget
         this.renderer.setRenderTarget(this._finalTarget);
@@ -926,6 +939,7 @@ export class SceneBuilder {
             this._compositeQuad.material.needsUpdate = true;
             this.renderer.render(this._compositeScene, this._compositeCamera);
         }
+        const tLayers = dbg ? performance.now() : 0;
 
         // 2. PP pipeline → screen  (or direct blit if no pipeline)
         if (this._postPipeline) {
@@ -938,12 +952,25 @@ export class SceneBuilder {
             this.renderer.render(this._compositeScene, this._compositeCamera);
         }
 
+        const tPP = dbg ? performance.now() : 0;
+
         // 3. Gizmo overlay — always on top, after PP. Suppressed in fullscreen
         // viewport mode so the user can see a clean render.
         if (!this._gizmoHidden && this._transformControls.object) {
             this.renderer.setRenderTarget(null);
             this.renderer.clearDepth();
             this.renderer.render(this._gizmoScene, this.camera);
+        }
+
+        if (dbg) {
+            const tEnd = performance.now();
+            const t = this._timings;
+            const a = 0.1; // EMA smoothing
+            t.objects = t.objects * (1 - a) + (tObj    - t0)     * a;
+            t.layers  = t.layers  * (1 - a) + (tLayers - tObj)   * a;
+            t.postFx  = t.postFx  * (1 - a) + (tPP     - tLayers)* a;
+            t.gizmo   = t.gizmo   * (1 - a) + (tEnd    - tPP)    * a;
+            t.render  = t.render  * (1 - a) + (tEnd    - t0)     * a;
         }
     }
 

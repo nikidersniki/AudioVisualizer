@@ -331,6 +331,30 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         }
         requestAnimationFrame(applyViewportAspect);
 
+        // ── Debug HUD ─────────────────────────────────────
+        const VP_DEBUG_KEY = 'gl-debug-hud';
+        const debugToggle = document.getElementById('viewport-debug-toggle');
+        const hud = document.createElement('div');
+        hud.id = 'viewport-debug-hud';
+        hud.style.display = 'none';
+        viewportFrame.appendChild(hud);
+
+        const setDebug = (on) => {
+            hud.style.display = on ? 'block' : 'none';
+            const sb = window.__SCENE_BUILDER__;
+            if (sb) sb._debugEnabled = on;
+            window.__DEBUG_HUD__ = on ? hud : null;
+        };
+        const initDbg = localStorage.getItem(VP_DEBUG_KEY) === '1';
+        if (debugToggle) debugToggle.checked = initDbg;
+        // SceneBuilder may not be on window yet; defer apply
+        requestAnimationFrame(() => setDebug(initDbg));
+        debugToggle?.addEventListener('change', () => {
+            const on = !!debugToggle.checked;
+            localStorage.setItem(VP_DEBUG_KEY, on ? '1' : '0');
+            setDebug(on);
+        });
+
         // Reset layout helper (exposed)
         window.resetLayout = () => {
             localStorage.removeItem(SAVE_KEY);
