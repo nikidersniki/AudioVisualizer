@@ -316,6 +316,152 @@ header .h2 {
 }
 .prop-animate-btn.active:hover { filter: brightness(1.1); }
 
+/* ⌨ map-to-key button — mirrors .prop-animate-btn */
+.prop-keymap-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    margin-left: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-lift);
+    color: var(--text-faint);
+    cursor: pointer;
+    font-size: 0.7rem;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.prop-keymap-btn:hover {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Key / MIDI override editor inside an animation property block */
+.anim-key-section {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+}
+.anim-key-head {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-bottom: 4px;
+}
+.anim-key-bind {
+    flex: 1;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-lift);
+    color: var(--text);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+}
+.anim-key-bind:hover { border-color: var(--accent); color: var(--accent); }
+.anim-key-bind.listening {
+    border-color: var(--accent);
+    color: var(--accent);
+    animation: keyBlink 0.8s steps(2, start) infinite;
+}
+@keyframes keyBlink { 50% { opacity: 0.5; } }
+.anim-key-clear {
+    margin-left: 4px;
+    cursor: pointer;
+    color: var(--text-faint);
+    flex-shrink: 0;
+}
+.anim-key-clear:hover { color: var(--accent); }
+
+/* ── Key Map window ────────────────────────────────────────────── */
+#key-map {
+    padding: 8px;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+}
+.keymap-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    color: var(--text-faint);
+}
+.keymap-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 6px;
+}
+/* Bordered box: key area (fills/drains) on top, detail rows below */
+.keymap-cube-wrap {
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg);
+    overflow: hidden;
+}
+.keymap-cube-wrap.conflict { border-color: #d08020; }
+.keymap-cube {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+}
+.keymap-cube-wrap.conflict .keymap-cube { border-bottom-color: #d08020; }
+.keymap-cube-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 0;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-dim);
+    pointer-events: none;
+}
+.keymap-cube-key {
+    position: relative;
+    z-index: 1;
+    color: var(--text);
+    font-weight: 600;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    text-align: center;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+.keymap-cube-wrap.conflict .keymap-cube-key { color: #d08020; }
+/* Black copy clipped to the fill level (clip-path set per-frame in JS) */
+.keymap-cube-key.over {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #000;
+    text-shadow: none;
+    clip-path: inset(100% 0 0 0);
+}
+.keymap-cube-rows { display: flex; flex-direction: column; line-height: 1.25; }
+.keymap-cube-row {
+    padding: 3px 8px;
+    color: var(--text);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-bottom: 1px solid var(--border);
+}
+.keymap-cube-row:last-child { color: var(--text-faint); border-bottom: none; }
+
 /* ── Animation Tab ─────────────────────────────────────────────── */
 #anim-section { padding: 6px 0; }
 #anim-section > .h2 {
@@ -520,6 +666,9 @@ header .h2 {
     border: 1px solid var(--border);
     border-radius: 3px;
     overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 .audio-meter-cube-fill {
     position: absolute;
@@ -532,11 +681,28 @@ header .h2 {
     transition: height 0.04s linear;
 }
 .audio-meter-cube-label {
-    color: var(--text-faint);
-    text-transform: lowercase;
+    position: relative;
+    z-index: 1;
+    padding: 0 2px;
+    color: var(--text);
+    text-transform: uppercase;
+    font-weight: 700;
     text-align: center;
     line-height: 1;
     word-break: break-word;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+/* Black copy clipped to the fill level (clip-path set per-frame in JS) */
+.audio-meter-cube-label.over {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #000;
+    text-shadow: none;
+    clip-path: inset(100% 0 0 0);
 }
 
 /* Inline mini-meter next to Source dropdown */

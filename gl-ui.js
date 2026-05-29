@@ -33,6 +33,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         const ppSection = document.getElementById('pp-section');
         const animSec   = document.getElementById('anim-section');
         const audioMon  = document.getElementById('audio-monitor');
+        const keyMap    = document.getElementById('key-map');
         const player    = document.getElementById('player');
         const progress  = document.getElementById('progress-bar-container');
         const nowPlay   = document.getElementById('now-playing');
@@ -44,6 +45,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         if (ppSection) ppSection.style.display = '';
         if (animSec)   animSec.style.display = '';
         if (audioMon)  audioMon.style.display = '';
+        if (keyMap)    keyMap.style.display = '';
         if (layers)    layers.style.display = '';
 
         // Viewport host: canvas wrapped in a frame so it can be letterboxed for fixed aspect
@@ -91,7 +93,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         if (nowPlay)  progressHost.appendChild(nowPlay);
         if (progress) progressHost.appendChild(progress);
 
-        [viewportHost, outlinerHost, objEditor, ppSection, animSec, audioMon, player, progressHost, controlls, projSet]
+        [viewportHost, outlinerHost, objEditor, ppSection, animSec, audioMon, keyMap, player, progressHost, controlls, projSet]
             .filter(Boolean).forEach(h => stash.appendChild(h));
 
         // ── Component definitions ─────────────────────────
@@ -103,6 +105,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
             'post-processing': { title: 'Post Processing', hostId: 'pp-section' },
             'animation':       { title: 'Animation',       hostId: 'anim-section' },
             'audio-monitor':   { title: 'Audio Monitor',   hostId: 'audio-monitor' },
+            'key-map':         { title: 'Key Map',         hostId: 'key-map' },
             'progress-bar':    { title: 'Player',          hostId: 'progress-host' },
             'settings':        { title: 'Settings',        hostId: 'controlls' },
             'project-settings':{ title: 'Project Settings', hostId: 'project-settings' }

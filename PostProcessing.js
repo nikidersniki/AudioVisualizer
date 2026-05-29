@@ -560,7 +560,7 @@ export class NativePassLayer {
         let merged = null;
         for (const key of Object.keys(this.propertyBindings)) {
             const b = this.propertyBindings[key];
-            if (!b || b.mode !== 'audio') continue;
+            if (!b || (b.mode !== 'audio' && !b.keyCode)) continue;
             if (!merged) merged = { ...this.properties };
             merged[key] = b.resolve(audioData);
         }
@@ -620,7 +620,7 @@ export class PostProcessingLayer {
         let merged = null;
         for (const key of Object.keys(this.propertyBindings)) {
             const b = this.propertyBindings[key];
-            if (!b || b.mode !== 'audio') continue;
+            if (!b || (b.mode !== 'audio' && !b.keyCode)) continue;
             if (!merged) merged = { ...this.properties };
             merged[key] = b.resolve(audioData);
         }

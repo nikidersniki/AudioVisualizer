@@ -1,3 +1,5 @@
+import { inputBus } from './InputBus.js';
+
 // ─────────────────────────────────────────────
 //  PropertyBinding
 //  A single animatable value: constant or audio-driven
@@ -10,26 +12,89 @@ export class PropertyBinding {
         this.min    = 0;                // remap range
         this.max    = 1;
         this.curve  = 'linear';         // 'linear' | 'exponential' | 'inverse'
+
+        // ── Key / MIDI override (optional) ──
+        // While the trigger is active the property switches from its base value
+        // (constant/audio above) to the override target below.
+        this.keyCode    = null;         // trigger id: 'key:KeyA' | 'midi:note:36' | 'midi:cc:7'
+        this.keyTrigger = 'hold';       // 'hold' (active while down) | 'toggle' (press flips)
+        this.keyTarget  = 'static';     // 'static' | 'sampled'
+        this.keyValue   = 0;            // static override value
+        this.keySource  = 'beat';       // sampled override source ('beat' | 'midi:cc:7' | …)
+        this.keyMin     = 0;
+        this.keyMax     = 1;
+        this.keyCurve   = 'linear';
+        this.keyEase    = 'snap';       // 'snap' | 'ramp'
+        this.keyFade    = 200;          // ms, used when ease === 'ramp'
+
+        // transient ramp state — never serialized
+        this._rampVal  = null;
+        this._rampLast = 0;
+        this._keyEnv   = 0;   // 0..1 activation envelope (drives Key Map cube fill)
+    }
+
+    _sampleNorm(srcId, audioData) {
+        if (srcId && srcId.indexOf('midi:') === 0) return inputBus.ccValue(srcId); // 0..1
+        const raw = (audioData && audioData[srcId]) ?? 0; // 0–255
+        return raw / 255;
+    }
+
+    _remap(t, curve, min, max) {
+        let mapped = t;
+        if (curve === 'exponential') mapped = t * t;
+        else if (curve === 'inverse') mapped = 1 - t;
+        return +min + mapped * (max - min);
     }
 
     resolve(audioData) {
-        if (this.mode === 'constant') return this.value;
-        const raw = audioData[this.source] ?? 0; // 0–255
-        const t = raw / 255;
-        let mapped;
-        if (this.curve === 'exponential') mapped = t * t;
-        else if (this.curve === 'inverse') mapped = 1 - t;
-        else mapped = t;
-        return +this.min + mapped * (this.max - this.min);
+        // Base value (legacy behavior)
+        let base;
+        if (this.mode === 'constant') base = this.value;
+        else base = this._remap(this._sampleNorm(this.source, audioData), this.curve, this.min, this.max);
+
+        if (!this.keyCode) return base;
+
+        // Override target while trigger active
+        const active = inputBus.isActive(this.keyCode, this.keyTrigger);
+        let target = base;
+        if (active) {
+            target = (this.keyTarget === 'sampled')
+                ? this._remap(this._sampleNorm(this.keySource, audioData), this.keyCurve, this.keyMin, this.keyMax)
+                : this.keyValue;
+        }
+        const envTarget = active ? 1 : 0;
+
+        if (this.keyEase !== 'ramp') {
+            this._rampVal = target;
+            this._keyEnv  = envTarget;
+            return target;
+        }
+
+        // Ramp value and activation envelope toward target over keyFade ms
+        const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+        const dt = this._rampLast ? (now - this._rampLast) : 0;
+        this._rampLast = now;
+        const a = this.keyFade > 0 ? Math.min(1, dt / this.keyFade) : 1;
+        if (this._rampVal == null) this._rampVal = target;
+        this._rampVal += (target - this._rampVal) * a;
+        this._keyEnv  += (envTarget - this._keyEnv) * a;
+        return this._rampVal;
     }
 
     toJSON() {
         return { mode: this.mode, value: this.value, source: this.source,
-                 min: this.min, max: this.max, curve: this.curve };
+                 min: this.min, max: this.max, curve: this.curve,
+                 keyCode: this.keyCode, keyTrigger: this.keyTrigger, keyTarget: this.keyTarget,
+                 keyValue: this.keyValue, keySource: this.keySource,
+                 keyMin: this.keyMin, keyMax: this.keyMax, keyCurve: this.keyCurve,
+                 keyEase: this.keyEase, keyFade: this.keyFade };
     }
 
     static fromJSON(d) {
-        return Object.assign(new PropertyBinding(), d);
+        // Object.assign over a fresh instance: any missing (older) fields keep defaults.
+        const b = Object.assign(new PropertyBinding(), d);
+        b._rampVal = null; b._rampLast = 0;
+        return b;
     }
 }
 

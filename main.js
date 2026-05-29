@@ -7,6 +7,7 @@ import { Layer, ModelObject, PointLightObject, WaveObject, FillObject, PropertyB
 import { PP_SHADER_REGISTRY, PP_NATIVE_REGISTRY, PostProcessingLayer, PostProcessingPipeline, NativePassLayer, initShaders } from './PostProcessing.js';
 import {generateMaterialPreviews, generateModelPreviews, generatePPPreviews} from './PreviewRenderer.js';
 import { readID3Title } from './SoundNameReader.js';
+import { inputBus } from './InputBus.js';
 import './mobile-ui.js';
 
 // ─────────────────────────────────────────────
@@ -416,6 +417,10 @@ const builder = new SceneBuilder(canvas);
 // Expose for gl-ui.js (separate module) to toggle the gizmo overlay
 window.__SCENE_BUILDER__ = builder;
 
+// Refresh the Key Map overview when MIDI connects/new CC seen, or a window opens
+inputBus.onChange(() => renderKeyMap());
+window.addEventListener('gl-layout-changed', () => renderKeyMap());
+
 // ─────────────────────────────────────────────
 //  Audio
 // ─────────────────────────────────────────────
@@ -671,7 +676,10 @@ function toggleAnimatedProperty(objectId, key, label, range = { min: -10, max: 1
             }
         } else {
             const found = findObjectById(objectId);
-            if (found && found.obj[key]) found.obj[key].mode = 'constant';
+            if (found && found.obj[key]) {
+                found.obj[key].mode = 'constant';
+                found.obj[key].keyCode = null;
+            }
         }
     } else {
         const entry = { objectId, key, label, range };
@@ -695,6 +703,32 @@ function toggleAnimatedProperty(objectId, key, label, range = { min: -10, max: 1
         } else {
             const found = findObjectById(objectId);
             if (found && found.obj[key]) found.obj[key].mode = 'audio';
+        }
+        animatedProperties.push(entry);
+    }
+    saveAllToDB();
+    renderAnimationList();
+    for (const fn of _animBtnRefreshers)   fn();
+    for (const fn of _ppAnimBtnRefreshers) fn();
+}
+
+// Ensure a property is listed in the Animation panel without forcing audio mode,
+// so it can be key/MIDI mapped while keeping a constant base value.
+function addKeyMapEntry(objectId, key, label, range = { min: -10, max: 10 }, opts = {}) {
+    const exists = animatedProperties.some(e => e.objectId === objectId && e.key === key);
+    if (!exists) {
+        const entry = { objectId, key, label, range };
+        if (opts.isPP) {
+            entry.isPP = true;
+            entry.ppContextId = opts.ppContextId ?? null;
+            const found = findPPLayerById(objectId);
+            if (found?.ppLayer && !found.ppLayer.propertyBindings[key]) {
+                const b = new PropertyBinding(found.ppLayer.properties[key] ?? 0);
+                b.mode = 'constant';
+                b.min  = range.min;
+                b.max  = range.max;
+                found.ppLayer.propertyBindings[key] = b;
+            }
         }
         animatedProperties.push(entry);
     }
@@ -763,12 +797,127 @@ function _animSelectControl(options, value, onChange) {
     sel.className = 'prop-select';
     options.forEach(o => {
         const opt = document.createElement('option');
-        opt.value = opt.textContent = o;
+        if (typeof o === 'object') { opt.value = o.value; opt.textContent = o.label; }
+        else { opt.value = opt.textContent = o; }
         sel.appendChild(opt);
     });
     sel.value = value;
     sel.addEventListener('change', () => onChange(sel.value));
     return sel;
+}
+
+// Human-readable label for an input trigger / source id.
+function _inputLabel(id) {
+    if (!id) return 'None';
+    if (id.startsWith('key:'))       return id.slice(4).replace(/^Key|^Digit/, '');
+    if (id.startsWith('midi:note:')) return 'MIDI Note ' + id.slice(10);
+    if (id.startsWith('midi:cc:'))   return 'MIDI CC ' + id.slice(8);
+    return id;
+}
+
+// Source options for a sampled override: audio signals + any seen MIDI CCs.
+function _sampledSourceOptions(current) {
+    const opts = [
+        ...AUDIO_SOURCES.map(s => ({ value: s, label: s })),
+        ...inputBus.knownCCs().map(c => ({ value: c, label: _inputLabel(c) })),
+    ];
+    if (current && !opts.some(o => o.value === current))
+        opts.unshift({ value: current, label: _inputLabel(current) });
+    return opts;
+}
+
+// Collapsible "Key / MIDI" override editor for one PropertyBinding.
+function _animKeyOverrideSection(binding, range, rerender) {
+    const wrap = document.createElement('div');
+    wrap.className = 'anim-key-section';
+
+    const head = document.createElement('div');
+    head.className = 'anim-key-head';
+    head.textContent = 'Key / MIDI Override';
+    wrap.appendChild(head);
+
+    // Trigger bind / clear
+    const bindRow = document.createElement('div');
+    bindRow.className = 'prop-row';
+    const bindLbl = document.createElement('label');
+    bindLbl.className = 'prop-label';
+    bindLbl.textContent = 'Trigger';
+    const bindBtn = document.createElement('button');
+    bindBtn.className = 'anim-key-bind';
+    bindBtn.textContent = binding.keyCode ? _inputLabel(binding.keyCode) : 'Set key…';
+    bindBtn.title = 'Click, then press a key or move/press a MIDI control';
+    bindBtn.addEventListener('click', () => {
+        inputBus.enableMIDI();
+        bindBtn.classList.add('listening');
+        bindBtn.textContent = 'Press key / MIDI…';
+        inputBus.startLearn(id => {
+            binding.keyCode = id;
+            saveAllToDB();
+            rerender();
+            renderKeyMap();
+        });
+    });
+    bindRow.appendChild(bindLbl);
+    bindRow.appendChild(bindBtn);
+    if (binding.keyCode) {
+        const clr = document.createElement('span');
+        clr.className = 'anim-key-clear';
+        clr.textContent = '✕';
+        clr.title = 'Clear trigger';
+        clr.addEventListener('click', () => {
+            binding.keyCode = null;
+            saveAllToDB(); rerender(); renderKeyMap();
+        });
+        bindRow.appendChild(clr);
+    }
+    wrap.appendChild(bindRow);
+
+    if (!binding.keyCode) return wrap; // nothing more until a trigger is bound
+
+    // Trigger mode
+    wrap.appendChild(_animPropRow('Mode',
+        _animSelectControl(
+            [{ value: 'hold', label: 'Hold' }, { value: 'toggle', label: 'Toggle' }],
+            binding.keyTrigger, v => { binding.keyTrigger = v; saveAllToDB(); renderKeyMap(); })));
+
+    // Override target
+    wrap.appendChild(_animPropRow('On trigger',
+        _animSelectControl(
+            [{ value: 'static', label: 'Static value' }, { value: 'sampled', label: 'Sampled' }],
+            binding.keyTarget, v => { binding.keyTarget = v; saveAllToDB(); rerender(); renderKeyMap(); })));
+
+    if (binding.keyTarget === 'static') {
+        wrap.appendChild(_animPropRow('Value',
+            _animSliderControl(binding.keyValue, range, 0.001, v => { binding.keyValue = v; saveAllToDB(); })));
+    } else {
+        wrap.appendChild(_animPropRow('Source',
+            _animSelectControl(_sampledSourceOptions(binding.keySource), binding.keySource,
+                v => { binding.keySource = v; saveAllToDB(); renderKeyMap(); })));
+        wrap.appendChild(_animPropRow('Curve',
+            _animSelectControl(CURVES, binding.keyCurve, v => { binding.keyCurve = v; saveAllToDB(); })));
+        wrap.appendChild(_animPropRow('Min',
+            _animSliderControl(binding.keyMin, range, 0.001, v => { binding.keyMin = v; saveAllToDB(); })));
+        wrap.appendChild(_animPropRow('Max',
+            _animSliderControl(binding.keyMax, range, 0.001, v => { binding.keyMax = v; saveAllToDB(); })));
+    }
+
+    // Transition
+    wrap.appendChild(_animPropRow('Transition',
+        _animSelectControl(
+            [{ value: 'snap', label: 'Snap' }, { value: 'ramp', label: 'Ramp' }],
+            binding.keyEase, v => { binding.keyEase = v; saveAllToDB(); rerender(); })));
+    if (binding.keyEase === 'ramp') {
+        const fadeWrap = document.createElement('div');
+        fadeWrap.className = 'prop-slider-wrap';
+        const num = document.createElement('input');
+        num.type = 'number'; num.className = 'prop-number';
+        num.min = 0; num.step = 10; num.value = binding.keyFade;
+        num.addEventListener('input', () => { binding.keyFade = Math.max(0, parseFloat(num.value) || 0); saveAllToDB(); });
+        fadeWrap.appendChild(num);
+        wrap.appendChild(_animPropRow('Fade (ms)', fadeWrap));
+    }
+
+    return wrap;
 }
 
 function _setupAnimTabs() {
@@ -879,14 +1028,35 @@ function renderAnimationList() {
             propBody.className = 'anim-property-body';
             propBody.style.display = 'none';
 
-            propBody.appendChild(_animPropRow('Source',
-                _animSourceControl(binding, () => saveAllToDB())));
-            propBody.appendChild(_animPropRow('Curve',
-                _animSelectControl(CURVES, binding.curve, v => { binding.curve = v; saveAllToDB(); })));
-            propBody.appendChild(_animPropRow('Min',
-                _animSliderControl(binding.min, range, 0.001, v => { binding.min = v; saveAllToDB(); })));
-            propBody.appendChild(_animPropRow('Max',
-                _animSliderControl(binding.max, range, 0.001, v => { binding.max = v; saveAllToDB(); })));
+            // Re-render just this block (cheap) after structural changes
+            const rerender = () => { renderAnimationList(); };
+
+            // ── Base value: Constant or Audio ──
+            propBody.appendChild(_animPropRow('Base',
+                _animSelectControl(['constant', 'audio'], binding.mode, v => {
+                    binding.mode = v; saveAllToDB(); rerender();
+                })));
+            if (binding.mode === 'audio') {
+                propBody.appendChild(_animPropRow('Source',
+                    _animSourceControl(binding, () => saveAllToDB())));
+                propBody.appendChild(_animPropRow('Curve',
+                    _animSelectControl(CURVES, binding.curve, v => { binding.curve = v; saveAllToDB(); })));
+                propBody.appendChild(_animPropRow('Min',
+                    _animSliderControl(binding.min, range, 0.001, v => { binding.min = v; saveAllToDB(); })));
+                propBody.appendChild(_animPropRow('Max',
+                    _animSliderControl(binding.max, range, 0.001, v => { binding.max = v; saveAllToDB(); })));
+            } else {
+                // Constant base — idle value (slider is disabled in the object panel while listed)
+                propBody.appendChild(_animPropRow('Value',
+                    _animSliderControl(binding.value, range, 0.001, v => {
+                        binding.value = v;
+                        if (isPP) { const f = findPPLayerById(entry.objectId); if (f) f.ppLayer.properties[entry.key] = v; }
+                        saveAllToDB();
+                    })));
+            }
+
+            // ── Key / MIDI override ──
+            propBody.appendChild(_animKeyOverrideSection(binding, range, rerender));
 
             propHead.addEventListener('click', () => {
                 const collapsed = propHead.classList.toggle('collapsed');
@@ -906,6 +1076,129 @@ function renderAnimationList() {
         });
 
         list.appendChild(groupWrap);
+    }
+    renderKeyMap();
+}
+
+// ─────────────────────────────────────────────
+//  Key Map — read-only overview of every key/MIDI mapping.
+//  Each mapping is a cube (like the audio monitor) whose fill rises while the
+//  trigger is active and drains over the binding's fade.
+//  Highlights triggers bound to multiple properties.
+// ─────────────────────────────────────────────
+const _keyMapBars = []; // { fill, binding } — live fill updaters
+const _keyMapHost = () => document.getElementById('key-map');
+
+function renderKeyMap() {
+    const host = _keyMapHost();
+    if (!host) return;
+    host.innerHTML = '';
+    _keyMapBars.length = 0;
+
+    // MIDI status / enable
+    const bar = document.createElement('div');
+    bar.className = 'keymap-bar';
+    if (!inputBus.midiSupported()) {
+        bar.textContent = 'MIDI not supported in this browser (try Chrome/Edge).';
+    } else if (inputBus.midiEnabled()) {
+        bar.textContent = 'MIDI active';
+    } else {
+        const b = document.createElement('button');
+        b.className = 'anim-key-bind';
+        b.textContent = 'Enable MIDI';
+        b.addEventListener('click', async () => { await inputBus.enableMIDI(); renderKeyMap(); });
+        bar.appendChild(b);
+    }
+    host.appendChild(bar);
+
+    // Collect mappings
+    const maps = []; // { keyCode, objName, propLabel, value, meta, binding }
+    for (const entry of animatedProperties) {
+        let binding, objName;
+        if (entry.isPP) {
+            const pp = findPPLayerById(entry.objectId);
+            if (!pp) continue;
+            binding = pp.ppLayer.propertyBindings[entry.key];
+            objName = pp.ppLayer.name;
+        } else {
+            const found = findObjectById(entry.objectId);
+            if (!found) continue;
+            binding = found.obj[entry.key];
+            const n = found.obj.name || found.obj.type;
+            objName = found.layer?.name ? `${found.layer.name}: ${n}` : n;
+        }
+        if (!binding || !binding.keyCode) continue;
+        const value = binding.keyTarget === 'static'
+            ? `${binding.keyValue}`
+            : _inputLabel(binding.keySource);
+        const ease = binding.keyEase === 'ramp' ? `ramp ${binding.keyFade}ms` : 'snap';
+        maps.push({
+            keyCode: binding.keyCode, objName, propLabel: entry.label,
+            value, meta: `${binding.keyTrigger} · ${ease}`, binding,
+        });
+    }
+
+    if (maps.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'anim-empty';
+        empty.textContent = 'No key / MIDI mappings yet — click ⌨ next to any property.';
+        host.appendChild(empty);
+        return;
+    }
+
+    // Count triggers for conflict detection
+    const counts = new Map();
+    for (const m of maps) counts.set(m.keyCode, (counts.get(m.keyCode) || 0) + 1);
+
+    const grid = document.createElement('div');
+    grid.className = 'keymap-grid';
+    for (const m of maps) {
+        const conflict = counts.get(m.keyCode) > 1;
+        const wrap = document.createElement('div');
+        wrap.className = 'keymap-cube-wrap' + (conflict ? ' conflict' : '');
+
+        const cube = document.createElement('div');
+        cube.className = 'keymap-cube';
+        const fill = document.createElement('div');
+        fill.className = 'keymap-cube-fill';
+        const keyText = _inputLabel(m.keyCode) + (conflict ? ' ⚠' : '');
+        const key = document.createElement('div');
+        key.className = 'keymap-cube-key';
+        key.textContent = keyText;
+        // Black copy, clipped to the fill level — text reads dark where fill covers it
+        const keyOver = document.createElement('div');
+        keyOver.className = 'keymap-cube-key over';
+        keyOver.textContent = keyText;
+        cube.appendChild(fill);
+        cube.appendChild(key);
+        cube.appendChild(keyOver);
+        wrap.appendChild(cube);
+
+        const rows = document.createElement('div');
+        rows.className = 'keymap-cube-rows';
+        for (const line of [m.objName, m.propLabel, `value ${m.value}`, m.meta]) {
+            const r = document.createElement('div');
+            r.className = 'keymap-cube-row';
+            r.textContent = line;
+            rows.appendChild(r);
+        }
+        wrap.appendChild(rows);
+
+        grid.appendChild(wrap);
+        _keyMapBars.push({ fill, keyOver, binding: m.binding });
+    }
+    host.appendChild(grid);
+}
+
+// Per-frame fill update — driven from the animate loop. Cheap no-op when closed.
+function _updateKeyMapMeters() {
+    if (_keyMapBars.length === 0) return;
+    const host = _keyMapHost();
+    if (!host || host.offsetParent === null) return; // window closed / stashed
+    for (const { fill, keyOver, binding } of _keyMapBars) {
+        const env = Math.min(1, Math.max(0, binding._keyEnv ?? 0));
+        fill.style.height = (env * 100) + '%';
+        if (keyOver) keyOver.style.clipPath = `inset(${(1 - env) * 100}% 0 0 0)`;
     }
 }
 
@@ -2398,6 +2691,15 @@ function renderPPLayerProperties(ppLayer) {
             _ppAnimBtnRefreshers.push(refresh);
             wrap.appendChild(animBtn);
 
+            const keyBtn = document.createElement('div');
+            keyBtn.className = 'prop-keymap-btn';
+            keyBtn.textContent = '⌨';
+            keyBtn.title = 'Map to key / MIDI (opens in Animation panel)';
+            keyBtn.addEventListener('click', () => {
+                addKeyMapEntry(ppLayer.id, def.key, def.label, range, { isPP: true, ppContextId });
+            });
+            wrap.appendChild(keyBtn);
+
             rowEl.appendChild(wrap);
         } else if (def.type === 'color') {
             const inp = document.createElement('input');
@@ -3067,6 +3369,15 @@ function renderObjectProperties(obj, layer) {
             });
             _animBtnRefreshers.push(refresh);
             wrap.appendChild(animBtn);
+
+            const keyBtn = document.createElement('div');
+            keyBtn.className = 'prop-keymap-btn';
+            keyBtn.textContent = '⌨';
+            keyBtn.title = 'Map to key / MIDI (opens in Animation panel)';
+            keyBtn.addEventListener('click', () => {
+                addKeyMapEntry(panelObjId, ownerKey, label, range);
+            });
+            wrap.appendChild(keyBtn);
         }
 
         valueRow.appendChild(lbl);
@@ -3900,11 +4211,15 @@ const _audioMeterBars = new Map();
         const lbl = document.createElement('div');
         lbl.className = 'audio-meter-cube-label';
         lbl.textContent = key;
+        const over = document.createElement('div');
+        over.className = 'audio-meter-cube-label over';
+        over.textContent = key;
         cube.appendChild(fill);
+        cube.appendChild(lbl);
+        cube.appendChild(over);
         wrap.appendChild(cube);
-        wrap.appendChild(lbl);
         _audioMonitorEls.meters.appendChild(wrap);
-        _audioMeterBars.set(key, { fill });
+        _audioMeterBars.set(key, { fill, over });
     }
 })();
 
@@ -3966,10 +4281,12 @@ function _updateAudioMonitor(ad) {
     if (_audioMonitorEls.bpm)
         _audioMonitorEls.bpm.textContent = `BPM: ${ad.bpm > 0 ? Math.round(ad.bpm) : '--'}`;
 
-    for (const [key, { fill }] of _audioMeterBars) {
+    for (const [key, { fill, over }] of _audioMeterBars) {
         const raw = ad[key] ?? 0;
         const norm = key === 'bpm' ? raw / 240 : raw / 255;
-        fill.style.height = (Math.min(1, Math.max(0, norm)) * 100) + '%';
+        const v = Math.min(1, Math.max(0, norm));
+        fill.style.height = (v * 100) + '%';
+        if (over) over.style.clipPath = `inset(${(1 - v) * 100}% 0 0 0)`;
     }
 }
 
@@ -3980,6 +4297,7 @@ function animate(time) {
     const t0 = dbg ? performance.now() : 0;
     builder.updateAudioData(analyser, Volume);
     _updateAudioMonitor(builder.audioData);
+    _updateKeyMapMeters();
     for (const fn of _audioInlineMeterUpdaters) fn(builder.audioData);
     updateProgressBar();
     _drawWaveformPreview();
