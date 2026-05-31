@@ -44,6 +44,7 @@ export class PRESETS{
         { name: 'tube',      path: './models/Tube.fbx',                  scale: [0.01, 0.01, 0.01] },
         { name: 'MacNCheese',      path: './models/MacNCheese.fbx',                  scale: [0.01, 0.01, 0.01] },
     ];
+    static TEXTURE_CATALOGUE = []; // populated via _registerCustomTexture (from FBX imports)
         // ── Shared materials ───────────────────────────
     static materials = {
         normal:    new MeshNormalMaterial(),
@@ -237,11 +238,26 @@ export class SceneBuilder {
     // ─────────────────────────────────────────
     //  Post-processing pipeline
     // ─────────────────────────────────────────
-    setPostPipeline(pipeline) { this._postPipeline = pipeline; }
+    setPostPipeline(pipeline) {
+        this._postPipeline = pipeline;
+        // Pipelines are often constructed with window dimensions before the
+        // canvas has settled into its real GoldenLayout size. Sync immediately
+        // so iResolution-dependent shaders (dot screen, sharpen, …) render at
+        // the correct scale on first frame.
+        if (pipeline && (pipeline.width !== this.width || pipeline.height !== this.height)) {
+            pipeline.resize(this.width, this.height);
+        }
+    }
 
     setLayerPPPipeline(layerId, pipeline) {
-        if (pipeline) this._layerPPPipelines.set(layerId, pipeline);
-        else          this._layerPPPipelines.delete(layerId);
+        if (pipeline) {
+            this._layerPPPipelines.set(layerId, pipeline);
+            if (pipeline.width !== this.width || pipeline.height !== this.height) {
+                pipeline.resize(this.width, this.height);
+            }
+        } else {
+            this._layerPPPipelines.delete(layerId);
+        }
     }
 
     // ─────────────────────────────────────────
@@ -374,7 +390,7 @@ export class SceneBuilder {
 
         const mat = new LineMaterial({
             color:       waveObj.color,
-            opacity:     waveObj.opacity,
+            opacity:     waveObj.opacity.value,
             transparent: true,
             linewidth:   waveObj.lineWidth ?? 1,
         });
@@ -392,7 +408,7 @@ export class SceneBuilder {
         fillGeo.setAttribute('position', new BufferAttribute(fillVerts, 3).setUsage(DynamicDrawUsage));
         const fillMat = new MeshBasicMaterial({
             color:       waveObj.fillColor ?? waveObj.color,
-            opacity:     waveObj.opacity,
+            opacity:     waveObj.opacity.value,
             transparent: true,
             side:        DoubleSide,
             depthWrite:  false,
@@ -445,13 +461,14 @@ export class SceneBuilder {
             const hue = (ad.avgFrequency / 255) * (waveObj.colorSensitivity ?? 0.5);
             three.material.color.setHSL(hue, 1, 0.5);
         }
-        three.material.opacity = waveObj.opacity;
+        const waveOpacity = waveObj.opacity.resolve(ad);
+        three.material.opacity = waveOpacity;
 
         // Fill mesh sync
         if (three._fillMesh) {
             const supportsFill = this._waveSupportsFill(waveObj.waveType);
             three._fillMesh.visible = !!waveObj.fill && supportsFill;
-            three._fillMesh.material.opacity = waveObj.opacity;
+            three._fillMesh.material.opacity = waveOpacity;
             three._fillMesh.material.color.set(waveObj.fillColor ?? waveObj.color);
             if (waveObj.colorReactive) {
                 three._fillMesh.material.color.copy(three.material.color);
@@ -609,7 +626,7 @@ export class SceneBuilder {
         }
 
         const mat     = mesh.material;
-        const opacity = fillObj.opacity ?? 1;
+        const opacity = fillObj.opacity.resolve(ad);
         if (mat.opacity !== opacity) { mat.opacity = opacity; mat.transparent = opacity < 1; mat.needsUpdate = true; }
 
         const isVideo = fillObj.mediaType === 'video';
@@ -660,7 +677,7 @@ export class SceneBuilder {
                 mat.map = null; mat.needsUpdate = true;
             }
             if (fillObj.imageName && mesh._imageLoadedName !== fillObj.imageName) {
-                const entry = PRESETS.BG_CATALOGUE.find(e => e.name === fillObj.imageName);
+                const entry = this._findAsset(fillObj.imageName);
                 if (entry) {
                     mesh._imageLoadedName = fillObj.imageName;
                     const p = new Promise(resolve => {
@@ -680,8 +697,19 @@ export class SceneBuilder {
     //  Model loading
     // ─────────────────────────────────────────
 
+    // Look up an asset by name across all three catalogues (built-in HDRIs,
+    // built-in backgrounds, and custom textures) — HDRI / BG / material maps
+    // are interchangeable.
+    _findAsset(name) {
+        if (!name) return null;
+        return PRESETS.HDRI_CATALOGUE.find(e => e.name === name)
+            ?? PRESETS.BG_CATALOGUE.find(e => e.name === name)
+            ?? PRESETS.TEXTURE_CATALOGUE.find(e => e.name === name)
+            ?? null;
+    }
+
     setHDRI(name) {
-        const entry = PRESETS.HDRI_CATALOGUE.find(e => e.name === name);
+        const entry = this._findAsset(name);
         if (!entry) return;
         this.selectedHDRI = name;
         const isExr = entry.path.endsWith('.exr');
@@ -738,6 +766,46 @@ export class SceneBuilder {
         return tex;
     }
 
+    // Convert a Three.js texture's image to a PNG data URL.
+    // FBX-embedded textures are decoded asynchronously: their HTMLImageElement
+    // may not be `complete` by the time the loader's onLoad fires, so we wait
+    // for decode() or the load event before drawing.
+    async _textureToDataURL(threeTexture) {
+        const img = threeTexture?.image;
+        if (!img) return null;
+        if (img instanceof HTMLImageElement && !img.complete) {
+            try {
+                if (img.decode) await img.decode();
+                else await new Promise((res, rej) => {
+                    img.addEventListener('load',  res, { once: true });
+                    img.addEventListener('error', rej, { once: true });
+                });
+            } catch { return null; }
+        }
+        const w = img.width  || img.naturalWidth;
+        const h = img.height || img.naturalHeight;
+        if (!w || !h) return null;
+        try {
+            const c = document.createElement('canvas');
+            c.width = w; c.height = h;
+            c.getContext('2d').drawImage(img, 0, 0);
+            return c.toDataURL('image/png');
+        } catch { return null; }
+    }
+
+    // Load a catalogue texture by name (searches HDRI / BG / custom textures),
+    // lazily. Cached for reuse across models.
+    _loadCatalogueTexture(name) {
+        if (!name) return null;
+        if (!this._textureCache) this._textureCache = new Map();
+        if (this._textureCache.has(name)) return this._textureCache.get(name);
+        const entry = this._findAsset(name);
+        if (!entry) return null;
+        const tex = new TextureLoader().load(entry.path);
+        this._textureCache.set(name, tex);
+        return tex;
+    }
+
     _getCatalogue(name) {
         return PRESETS.MODEL_CATALOGUE.find(m => m.name === name) ?? null;
     }
@@ -754,8 +822,24 @@ export class SceneBuilder {
             raw = await new Promise((resolve, reject) => {
                 this._getLoader(entry).load(entry.path, resolve, undefined, reject);
             });
-            this._modelFBXTextures[modelObj.modelName] = this._extractFBXTextures(raw);
+            const tex = this._extractFBXTextures(raw);
+            this._modelFBXTextures[modelObj.modelName] = tex;
             this._modelCache[modelObj.modelName] = raw;
+            // Auto-import any embedded textures as catalogue assets. Each is
+            // named "<model> color/roughness/metalness/normal" and registered
+            // via the host callback (set by main.js) so it survives reloads.
+            if (typeof this.onFBXTextures === 'function') {
+                const named = {};
+                for (const slot of ['map', 'roughnessMap', 'metalnessMap', 'normalMap']) {
+                    if (!tex[slot]) continue;
+                    const url = await this._textureToDataURL(tex[slot]);
+                    if (!url) continue;
+                    const label = { map:'color', roughnessMap:'roughness',
+                                    metalnessMap:'metalness', normalMap:'normal' }[slot];
+                    named[slot] = { name: `${modelObj.modelName} ${label}`, dataURL: url };
+                }
+                if (Object.keys(named).length) this.onFBXTextures(modelObj.modelName, named);
+            }
         }
 
         const instance = raw.clone();
@@ -1104,22 +1188,22 @@ export class SceneBuilder {
                 mat.needsUpdate = true;
             }
 
-            // Sync FBX textures based on per-object flags
-            const wantMap      = modelObj.useMapTexture          ? (fbx.map          ?? null) : null;
-            const wantRoughMap = modelObj.useRoughnessMapTexture ? (fbx.roughnessMap ?? null) : null;
-            const wantMetalMap = modelObj.useMetalnessMapTexture ? (fbx.metalnessMap ?? null) : null;
-            const wantNormMap  = modelObj.useNormalMapTexture    ? (fbx.normalMap    ?? null) : null;
+            // Look up each catalogue texture by name (falls back to null when slot unset)
+            const wantMap      = this._loadCatalogueTexture(modelObj.colorMap);
+            const wantRoughMap = this._loadCatalogueTexture(modelObj.roughnessMap);
+            const wantMetalMap = this._loadCatalogueTexture(modelObj.metalnessMap);
+            const wantNormMap  = this._loadCatalogueTexture(modelObj.normalMap);
             if (mat.map          !== wantMap)      { mat.map          = wantMap;      mat.needsUpdate = true; }
             if (mat.roughnessMap !== wantRoughMap) { mat.roughnessMap = wantRoughMap; mat.needsUpdate = true; }
             if (mat.metalnessMap !== wantMetalMap) { mat.metalnessMap = wantMetalMap; mat.needsUpdate = true; }
             if (mat.normalMap    !== wantNormMap)  { mat.normalMap    = wantNormMap;  mat.needsUpdate = true; }
 
-            if (!modelObj.useRoughnessMapTexture)
+            if (!modelObj.roughnessMap)
                 mat.roughness = Math.max(0, Math.min(1, modelObj.roughness.resolve(ad)));
-            if (!modelObj.useMetalnessMapTexture)
+            if (!modelObj.metalnessMap)
                 mat.metalness = Math.max(0, Math.min(1, modelObj.metalness.resolve(ad)));
 
-            if (!modelObj.useMapTexture) {
+            if (!modelObj.colorMap) {
                 mat.color.set(modelObj.color);
                 if (modelObj.colorReactive) {
                     const hue = (ad.avgFrequency / 255) * (modelObj.colorSensitivity ?? 0.5);
@@ -1128,7 +1212,7 @@ export class SceneBuilder {
             } else {
                 mat.color.set(0xffffff); // neutral tint so map colours show unaffected
             }
-            const opacity = modelObj.opacity ?? 1;
+            const opacity = modelObj.opacity.resolve(ad);
             const wasTransparent = mat.transparent;
             const wasFlatShading = mat.flatShading;
             mat.opacity     = opacity;
@@ -1137,7 +1221,7 @@ export class SceneBuilder {
             mat.flatShading = !(modelObj.smoothShading ?? true);
             if (mat.transparent !== wasTransparent || mat.flatShading !== wasFlatShading) mat.needsUpdate = true;
         } else if (modelObj.materialType === 'wireframe') {
-            const opacity   = modelObj.opacity ?? 1;
+            const opacity   = modelObj.opacity.resolve(ad);
             const lineWidth = modelObj.wireframeLineWidth ?? 2;
             three.traverse(child => {
                 if (!child.isMesh || child._isWireframeOverlay) return;

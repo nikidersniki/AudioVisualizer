@@ -1,7 +1,7 @@
 import {
     WebGLRenderer, PerspectiveCamera, Scene,
     IcosahedronGeometry, Mesh, Box3, Vector3,
-    MeshNormalMaterial, PointLight,
+    MeshNormalMaterial, MeshBasicMaterial, PointLight,
     WebGLRenderTarget, PlaneGeometry, OrthographicCamera, ShaderMaterial,
 } from 'three';
 
@@ -79,7 +79,7 @@ function loadModelForPreview(entry) {
     return new Promise((resolve, reject) => {
         loader.load(entry.path, object => {
             object.scale.set(...entry.scale);
-            const mat = new MeshNormalMaterial();
+            const mat = new MeshBasicMaterial({ wireframe: true, color: 0xffffff });
             object.traverse(child => {
                 if (!child.isMesh) return;
                 try {

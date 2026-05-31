@@ -417,6 +417,30 @@ const builder = new SceneBuilder(canvas);
 // Expose for gl-ui.js (separate module) to toggle the gizmo overlay
 window.__SCENE_BUILDER__ = builder;
 
+// When an FBX is loaded for the first time and carries embedded textures,
+// auto-register them as catalogue assets and assign them to any models of
+// that type whose slots are still empty.
+builder.onFBXTextures = (modelName, named) => {
+    for (const slot of ['map', 'roughnessMap', 'metalnessMap', 'normalMap']) {
+        if (named[slot]) _registerCustomTexture(named[slot].name, named[slot].dataURL);
+    }
+    const slotField = { map: 'colorMap', roughnessMap: 'roughnessMap',
+                        metalnessMap: 'metalnessMap', normalMap: 'normalMap' };
+    for (const layer of builder.layers) {
+        for (const obj of layer.objects ?? []) {
+            if (obj.type !== 'model' || obj.modelName !== modelName) continue;
+            for (const slot of Object.keys(slotField)) {
+                if (named[slot] && !obj[slotField[slot]]) obj[slotField[slot]] = named[slot].name;
+            }
+        }
+    }
+    saveAllToDB();
+    if (selectedObject?.type === 'model' && selectedObject.modelName === modelName) {
+        const layer = builder.layers.find(l => l.objects?.some(o => o.id === selectedObject.id));
+        if (layer) renderObjectProperties(selectedObject, layer);
+    }
+};
+
 // Refresh the Key Map overview when MIDI connects/new CC seen, or a window opens
 inputBus.onChange(() => renderKeyMap());
 window.addEventListener('gl-layout-changed', () => renderKeyMap());
@@ -448,12 +472,18 @@ let Volume = (() => {
 listener.setMasterVolume(Volume);
 let allTracks    = [];   // { id, file, name, ... } in display order
 let currentTrackId = null;
-const customCatalogues = { hdri: [], bg: [], video: [], model: [] }; // hdri/bg/video: { name, dataURL }; model: { name, dataURL, format, scale } — persisted in global layer
+const customCatalogues = { video: [], model: [], textures: [] }; // video/textures: { name, dataURL }; model: { name, dataURL, format, scale } — persisted in global layer. HDRI/BG/material textures all live in `textures`.
 let animatedProperties = []; // [{ objectId, key, label }] — persisted in global layer
 let animTab = 'obj'; // 'obj' | 'pp'
 const _animBtnRefreshers = []; // refresh fns for currently rendered property-panel animate buttons
 const _ppAnimBtnRefreshers = []; // refresh fns for PP property-panel animate buttons
+const _textureSlotRefreshers = []; // refresh fns for texture-slot buttons on the current object panel
 const _audioInlineMeterUpdaters = []; // fns(audioData) for mini-meters next to Source dropdowns
+
+// Expand/collapse state preserved across re-renders (rebuilds wipe the DOM)
+const _animOpenGroups  = new Set(); // objectId
+const _animOpenProps   = new Set(); // `${objectId}/${key}`
+const _objSectionsOpen = new Set(); // `${obj.id}::${title}`
 
 // ─────────────────────────────────────────────
 //  IndexedDB
@@ -546,14 +576,17 @@ async function deserializeAll(data) {
     // their image references and HDRI lookups work on first frame
     if (globalEntry?.customCatalogues) {
         const saved = globalEntry.customCatalogues;
-        customCatalogues.hdri  = [];
-        customCatalogues.bg    = [];
-        customCatalogues.video = [];
-        customCatalogues.model = [];
-        for (const e of (saved.hdri  ?? [])) _registerCustomHDRI(e.name,  e.dataURL);
-        for (const e of (saved.bg    ?? [])) _registerCustomBG(e.name,    e.dataURL);
-        for (const e of (saved.video ?? [])) _registerCustomVideo(e.name, e.dataURL);
-        for (const e of (saved.model ?? [])) _registerCustomModel(e.name, e.dataURL, e.format, e.scale);
+        customCatalogues.video    = [];
+        customCatalogues.model    = [];
+        customCatalogues.textures = [];
+        PRESETS.TEXTURE_CATALOGUE.length = 0;
+        // Legacy projects had separate hdri / bg arrays — migrate them into the
+        // unified textures catalogue. They were already image dataURLs.
+        for (const e of (saved.hdri     ?? [])) _registerCustomTexture(e.name, e.dataURL);
+        for (const e of (saved.bg       ?? [])) _registerCustomTexture(e.name, e.dataURL);
+        for (const e of (saved.textures ?? [])) _registerCustomTexture(e.name, e.dataURL);
+        for (const e of (saved.video    ?? [])) _registerCustomVideo(e.name,   e.dataURL);
+        for (const e of (saved.model    ?? [])) _registerCustomModel(e.name,   e.dataURL, e.format, e.scale);
     }
 
     await builder.loadFromJSON(sceneLayers);
@@ -601,24 +634,6 @@ async function deserializeAll(data) {
 }
 
 // ── Custom catalogue registration helpers ──────────────────────
-function _registerCustomHDRI(name, dataURL) {
-    if (PRESETS.HDRI_CATALOGUE.find(e => e.name === name)) return;
-    PRESETS.HDRI_CATALOGUE.push({ name, path: dataURL });
-    customCatalogues.hdri.push({ name, dataURL });
-    const sel = document.getElementById('scene-hdri');
-    if (sel && !sel.querySelector(`option[value="${CSS.escape(name)}"]`)) {
-        const opt = document.createElement('option');
-        opt.value = opt.textContent = name;
-        sel.appendChild(opt);
-    }
-}
-
-function _registerCustomBG(name, dataURL) {
-    if (PRESETS.BG_CATALOGUE.find(e => e.name === name)) return;
-    PRESETS.BG_CATALOGUE.push({ name, path: dataURL });
-    customCatalogues.bg.push({ name, dataURL });
-}
-
 function _registerCustomVideo(name, dataURL) {
     if (!PRESETS.VIDEO_CATALOGUE) PRESETS.VIDEO_CATALOGUE = [];
     if (PRESETS.VIDEO_CATALOGUE.find(e => e.name === name)) return;
@@ -632,6 +647,24 @@ function _registerCustomModel(name, dataURL, format, scale) {
     const sc  = Array.isArray(scale) && scale.length === 3 ? scale : [0.01, 0.01, 0.01];
     PRESETS.MODEL_CATALOGUE.push({ name, path: dataURL, scale: sc, format: fmt, isCustom: true });
     customCatalogues.model.push({ name, dataURL, format: fmt, scale: sc });
+}
+
+function _registerCustomTexture(name, dataURL) {
+    if (PRESETS.TEXTURE_CATALOGUE.find(e => e.name === name)) return;
+    PRESETS.TEXTURE_CATALOGUE.push({ name, path: dataURL });
+    customCatalogues.textures.push({ name, dataURL });
+    // Add the new texture to the HDRI dropdown so it can be used as an
+    // environment map — HDRI/BG/material textures are all interchangeable.
+    const sel = document.getElementById('scene-hdri');
+    if (sel && !sel.querySelector(`option[value="${CSS.escape(name)}"]`)) {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = name;
+        sel.appendChild(opt);
+    }
+    // Refresh any visible texture-slot buttons so newly imported textures
+    // become pickable / pre-selected without re-opening the object panel.
+    for (const fn of _textureSlotRefreshers) { try { fn(); } catch {} }
+    window.dispatchEvent(new CustomEvent('resources-changed'));
 }
 
 function fileToDataURL(file) {
@@ -712,32 +745,6 @@ function toggleAnimatedProperty(objectId, key, label, range = { min: -10, max: 1
     for (const fn of _ppAnimBtnRefreshers) fn();
 }
 
-// Ensure a property is listed in the Animation panel without forcing audio mode,
-// so it can be key/MIDI mapped while keeping a constant base value.
-function addKeyMapEntry(objectId, key, label, range = { min: -10, max: 10 }, opts = {}) {
-    const exists = animatedProperties.some(e => e.objectId === objectId && e.key === key);
-    if (!exists) {
-        const entry = { objectId, key, label, range };
-        if (opts.isPP) {
-            entry.isPP = true;
-            entry.ppContextId = opts.ppContextId ?? null;
-            const found = findPPLayerById(objectId);
-            if (found?.ppLayer && !found.ppLayer.propertyBindings[key]) {
-                const b = new PropertyBinding(found.ppLayer.properties[key] ?? 0);
-                b.mode = 'constant';
-                b.min  = range.min;
-                b.max  = range.max;
-                found.ppLayer.propertyBindings[key] = b;
-            }
-        }
-        animatedProperties.push(entry);
-    }
-    saveAllToDB();
-    renderAnimationList();
-    for (const fn of _animBtnRefreshers)   fn();
-    for (const fn of _ppAnimBtnRefreshers) fn();
-}
-
 function _animPropRow(labelText, control) {
     const row = document.createElement('div');
     row.className = 'prop-row';
@@ -784,10 +791,13 @@ function _animSourceControl(binding, onChange) {
     meter.appendChild(fill);
     wrap.appendChild(sel);
     wrap.appendChild(meter);
-    _audioInlineMeterUpdaters.push((ad) => {
-        const raw = ad[binding.source] ?? 0;
-        const norm = binding.source === 'bpm' ? raw / 240 : raw / 255;
-        fill.style.width = (Math.min(1, Math.max(0, norm)) * 100) + '%';
+    _audioInlineMeterUpdaters.push({
+        el: meter,
+        fn: (ad) => {
+            const raw = ad[binding.source] ?? 0;
+            const norm = binding.source === 'bpm' ? raw / 240 : raw / 255;
+            fill.style.width = (Math.min(1, Math.max(0, norm)) * 100) + '%';
+        },
     });
     return wrap;
 }
@@ -920,6 +930,183 @@ function _animKeyOverrideSection(binding, range, rerender) {
     return wrap;
 }
 
+// A binding is "animated" once it does anything beyond its constant default.
+function _isAnimated(binding) {
+    return !!binding && (binding.mode === 'audio' || !!binding.keyCode);
+}
+
+function _getPPCtxName(ctxId) {
+    return ctxId === 'global'
+        ? 'Global'
+        : (builder.layers.find(l => l.id === ctxId)?.name ?? ctxId);
+}
+
+// Add/remove the animated-properties list entry to match the binding's state.
+function _syncAnimEntry(objectId, key, label, range, opts, binding) {
+    const idx = animatedProperties.findIndex(e => e.objectId === objectId && e.key === key);
+    const animated = _isAnimated(binding);
+    if (animated && idx < 0) {
+        const entry = { objectId, key, label, range };
+        if (opts.isPP) { entry.isPP = true; entry.ppContextId = opts.ppContextId ?? null; }
+        animatedProperties.push(entry);
+    } else if (!animated && idx >= 0) {
+        animatedProperties.splice(idx, 1);
+    }
+}
+
+// Build the animation property editor for one binding.
+//   opts: { showKeyOverride, isPP, ppLayer, key, onChange }
+// Rebuilds itself in place when the structure changes (mode / target / ease).
+function _buildAnimEditor(binding, range, opts) {
+    const container = document.createElement('div');
+    container.className = 'anim-editor-body';
+    const onChange = opts.onChange || (() => {});
+
+    const rebuild = () => {
+        container.innerHTML = '';
+        build();
+    };
+
+    function build() {
+        container.appendChild(_animPropRow('Base',
+            _animSelectControl(['constant', 'audio'], binding.mode, v => {
+                binding.mode = v; onChange(); rebuild();
+            })));
+        if (binding.mode === 'audio') {
+            container.appendChild(_animPropRow('Source',
+                _animSourceControl(binding, onChange)));
+            container.appendChild(_animPropRow('Curve',
+                _animSelectControl(CURVES, binding.curve, v => { binding.curve = v; onChange(); })));
+            container.appendChild(_animPropRow('Min',
+                _animSliderControl(binding.min, range, 0.001, v => { binding.min = v; onChange(); })));
+            container.appendChild(_animPropRow('Max',
+                _animSliderControl(binding.max, range, 0.001, v => { binding.max = v; onChange(); })));
+        } else {
+            // Constant base — editable idle value (the property panel slider is disabled while listed)
+            container.appendChild(_animPropRow('Value',
+                _animSliderControl(binding.value, range, 0.001, v => {
+                    binding.value = v;
+                    if (opts.isPP && opts.ppLayer) opts.ppLayer.properties[opts.key] = v;
+                    onChange();
+                })));
+        }
+        if (opts.showKeyOverride) {
+            container.appendChild(_animKeyOverrideSection(binding, range, rebuild));
+        }
+    }
+    build();
+    return container;
+}
+
+// Modal editor for a single property's animation/key-MIDI settings.
+// Opened by the ● and ⌨ buttons on object + PP properties.
+//   opts: { objectId, key, label, range, isPP, ppContextId, showKeyOverride }
+function showAnimEditorPopup(opts) {
+    if (document.getElementById('anim-editor-popup-bg')) return;
+
+    let binding, ppLayer = null;
+    let displayPath;
+    if (opts.isPP) {
+        const f = findPPLayerById(opts.objectId);
+        if (!f) return;
+        ppLayer = f.ppLayer;
+        binding = ppLayer.propertyBindings[opts.key];
+        if (!binding) {
+            binding = new PropertyBinding(ppLayer.properties[opts.key] ?? 0);
+            binding.min = opts.range.min;
+            binding.max = opts.range.max;
+            ppLayer.propertyBindings[opts.key] = binding;
+        }
+        displayPath = `${_getPPCtxName(opts.ppContextId)}: ${ppLayer.name}`;
+    } else {
+        const found = findObjectById(opts.objectId);
+        if (!found) return;
+        binding = found.obj[opts.key];
+        if (!binding) return;
+        const objName = found.obj.name || found.obj.type;
+        displayPath = `${found.layer?.name ? found.layer.name + ': ' : ''}${objName}`;
+    }
+
+    const bg = document.createElement('div');
+    bg.className = 'popup-bg';
+    bg.id = 'anim-editor-popup-bg';
+
+    const popup = document.createElement('div');
+    popup.className = 'popup anim-editor-popup';
+
+    const title = document.createElement('div');
+    title.className = 'h1 popup-title-text';
+    title.textContent = `${displayPath} · ${opts.label}`;
+    popup.appendChild(title);
+
+    // Snapshot taken on open — Cancel reverts to it. If the snapshot was
+    // "not animated" (typical when opening to add animation), revert removes
+    // the animation entirely; if already animated, edits are discarded.
+    const snapshot = binding.toJSON();
+
+    let lastAnimated = _isAnimated(binding);
+    const refreshAll = () => {
+        _syncAnimEntry(opts.objectId, opts.key, opts.label, opts.range,
+            { isPP: opts.isPP, ppContextId: opts.ppContextId }, binding);
+        for (const fn of _animBtnRefreshers)   fn();
+        for (const fn of _ppAnimBtnRefreshers) fn();
+        const nowAnimated = _isAnimated(binding);
+        if (nowAnimated !== lastAnimated) {
+            lastAnimated = nowAnimated;
+            renderAnimationList();
+        } else {
+            renderKeyMap();
+        }
+    };
+
+    const editor = _buildAnimEditor(binding, opts.range, {
+        showKeyOverride: !!opts.showKeyOverride,
+        isPP: opts.isPP, ppLayer, key: opts.key,
+        onChange: () => { saveAllToDB(); refreshAll(); },
+    });
+    popup.appendChild(editor);
+
+    const btnBox = document.createElement('div');
+    btnBox.className = 'popup-button-box';
+
+    const cancelBtn = document.createElement('div');
+    cancelBtn.className = 'big-Btn';
+    cancelBtn.textContent = 'Cancel';
+    const cancel = () => {
+        // Revert binding to snapshot. fromJSON-style restoration: write every
+        // serializable field back, reset transient ramp state.
+        Object.assign(binding, snapshot);
+        binding._rampVal = null;
+        binding._rampLast = 0;
+        binding._keyEnv = 0;
+        if (opts.isPP && !_isAnimated(binding) && ppLayer.propertyBindings[opts.key] === binding) {
+            delete ppLayer.propertyBindings[opts.key];
+            ppLayer.invalidateMaterial?.();
+        }
+        saveAllToDB();
+        refreshAll();
+        bg.remove();
+    };
+    cancelBtn.addEventListener('click', cancel);
+
+    const doneBtn = document.createElement('div');
+    doneBtn.className = 'big-Btn';
+    doneBtn.textContent = 'Done';
+    doneBtn.addEventListener('click', () => {
+        saveAllToDB();
+        refreshAll();
+        bg.remove();
+    });
+
+    bg.addEventListener('click', e => { if (e.target === bg) cancel(); });
+
+    btnBox.appendChild(cancelBtn);
+    btnBox.appendChild(doneBtn);
+    popup.appendChild(btnBox);
+    bg.appendChild(popup);
+    document.body.appendChild(bg);
+}
+
 function _setupAnimTabs() {
     const objBtn = document.getElementById('anim-tab-obj');
     const ppBtn  = document.getElementById('anim-tab-pp');
@@ -937,7 +1124,7 @@ function _setupAnimTabs() {
 function renderAnimationList() {
     const list = document.getElementById('anim-list');
     list.innerHTML = '';
-    _audioInlineMeterUpdaters.length = 0;
+    // Detached meter elements get pruned by the animate-loop iterator.
 
     animatedProperties = animatedProperties.filter(e =>
         e.isPP ? findPPLayerById(e.objectId) : findObjectById(e.objectId));
@@ -967,7 +1154,10 @@ function renderAnimationList() {
         if (isPP) {
             const pp = findPPLayerById(objectId);
             if (!pp) continue;
-            displayName = `PP: ${pp.ppLayer.name}`;
+            const ctxName = pp.contextId === 'global'
+                ? 'Global'
+                : (builder.layers.find(l => l.id === pp.contextId)?.name ?? pp.contextId);
+            displayName = `${ctxName}: ${pp.ppLayer.name}`;
             getBinding = (key) => pp.ppLayer.propertyBindings[key];
         } else {
             const found = findObjectById(objectId);
@@ -1003,8 +1193,10 @@ function renderAnimationList() {
             const propWrap = document.createElement('div');
             propWrap.className = 'anim-property-block';
 
+            const propKey = `${entry.objectId}/${entry.key}`;
+            const propOpen = _animOpenProps.has(propKey);
             const propHead = document.createElement('div');
-            propHead.className = 'anim-property-head collapsed';
+            propHead.className = 'anim-property-head' + (propOpen ? '' : ' collapsed');
             const propName = document.createElement('span');
             propName.textContent = entry.label;
             const propArrow = document.createElement('span');
@@ -1026,53 +1218,43 @@ function renderAnimationList() {
 
             const propBody = document.createElement('div');
             propBody.className = 'anim-property-body';
-            propBody.style.display = 'none';
+            propBody.style.display = propOpen ? '' : 'none';
 
-            // Re-render just this block (cheap) after structural changes
-            const rerender = () => { renderAnimationList(); };
-
-            // ── Base value: Constant or Audio ──
-            propBody.appendChild(_animPropRow('Base',
-                _animSelectControl(['constant', 'audio'], binding.mode, v => {
-                    binding.mode = v; saveAllToDB(); rerender();
-                })));
-            if (binding.mode === 'audio') {
-                propBody.appendChild(_animPropRow('Source',
-                    _animSourceControl(binding, () => saveAllToDB())));
-                propBody.appendChild(_animPropRow('Curve',
-                    _animSelectControl(CURVES, binding.curve, v => { binding.curve = v; saveAllToDB(); })));
-                propBody.appendChild(_animPropRow('Min',
-                    _animSliderControl(binding.min, range, 0.001, v => { binding.min = v; saveAllToDB(); })));
-                propBody.appendChild(_animPropRow('Max',
-                    _animSliderControl(binding.max, range, 0.001, v => { binding.max = v; saveAllToDB(); })));
-            } else {
-                // Constant base — idle value (slider is disabled in the object panel while listed)
-                propBody.appendChild(_animPropRow('Value',
-                    _animSliderControl(binding.value, range, 0.001, v => {
-                        binding.value = v;
-                        if (isPP) { const f = findPPLayerById(entry.objectId); if (f) f.ppLayer.properties[entry.key] = v; }
-                        saveAllToDB();
-                    })));
-            }
-
-            // ── Key / MIDI override ──
-            propBody.appendChild(_animKeyOverrideSection(binding, range, rerender));
+            propBody.appendChild(_buildAnimEditor(binding, range, {
+                showKeyOverride: true,
+                isPP,
+                ppLayer: isPP ? findPPLayerById(entry.objectId)?.ppLayer : null,
+                key: entry.key,
+                onChange: () => {
+                    saveAllToDB();
+                    _syncAnimEntry(entry.objectId, entry.key, entry.label, range,
+                        { isPP, ppContextId: entry.ppContextId }, binding);
+                    for (const fn of _animBtnRefreshers)   fn();
+                    for (const fn of _ppAnimBtnRefreshers) fn();
+                    renderKeyMap();
+                },
+            }));
 
             propHead.addEventListener('click', () => {
                 const collapsed = propHead.classList.toggle('collapsed');
                 propBody.style.display = collapsed ? 'none' : '';
+                if (collapsed) _animOpenProps.delete(propKey);
+                else           _animOpenProps.add(propKey);
             });
 
             propWrap.appendChild(propBody);
             body.appendChild(propWrap);
         }
-        header.classList.add('collapsed');
-        body.style.display = 'none';
+        const groupOpen = _animOpenGroups.has(objectId);
+        header.classList.toggle('collapsed', !groupOpen);
+        body.style.display = groupOpen ? '' : 'none';
         groupWrap.appendChild(body);
 
         header.addEventListener('click', () => {
             const collapsed = header.classList.toggle('collapsed');
             body.style.display = collapsed ? 'none' : '';
+            if (collapsed) _animOpenGroups.delete(objectId);
+            else           _animOpenGroups.add(objectId);
         });
 
         list.appendChild(groupWrap);
@@ -2063,24 +2245,17 @@ async function handleDroppedFile(file) {
     if (file.type.startsWith('image/')) {
         let result;
         try {
-            result = await spawnPopup('Add Image', [
+            result = await spawnPopup('Import Texture', [
                 ['Name', 'text', true],
-                ['Type', 'select', ['HDRI', 'Background']],
             ]);
         } catch { return; }
-        const { Name: name, Type: type } = result;
+        const { Name: name } = result;
         const dataURL = await fileToDataURL(file);
-        if (type === 'HDRI') {
-            _registerCustomHDRI(name, dataURL);
-            const hdriSelect = document.getElementById('scene-hdri');
-            hdriSelect.value = name;
-            builder.setHDRI(name);
-        } else {
-            _registerCustomBG(name, dataURL);
-            if (selectedObject) {
-                const layer = builder.layers.find(l => l.objects?.some(o => o.id === selectedObject.id));
-                if (layer) renderObjectProperties(selectedObject, layer);
-            }
+        _registerCustomTexture(name, dataURL);
+        // Refresh property panel so any open Fill/model picker sees the new entry
+        if (selectedObject) {
+            const layer = builder.layers.find(l => l.objects?.some(o => o.id === selectedObject.id));
+            if (layer) renderObjectProperties(selectedObject, layer);
         }
         saveAllToDB();
         return;
@@ -2169,11 +2344,13 @@ async function _deleteAudioFileFromDB(id) {
     return new Promise((res, rej) => { tx.oncomplete = res; tx.onerror = rej; });
 }
 
-function _deleteCustomHDRI(name) {
-    const ci = customCatalogues.hdri.findIndex(e => e.name === name);
-    if (ci >= 0) customCatalogues.hdri.splice(ci, 1);
-    const pi = PRESETS.HDRI_CATALOGUE.findIndex(e => e.name === name);
-    if (pi >= 0) PRESETS.HDRI_CATALOGUE.splice(pi, 1);
+function _deleteCustomTexture(name) {
+    const ci = customCatalogues.textures.findIndex(e => e.name === name);
+    if (ci >= 0) customCatalogues.textures.splice(ci, 1);
+    const pi = PRESETS.TEXTURE_CATALOGUE.findIndex(e => e.name === name);
+    if (pi >= 0) PRESETS.TEXTURE_CATALOGUE.splice(pi, 1);
+
+    // Drop the option from the HDRI dropdown, falling back if it was active
     const sel = document.getElementById('scene-hdri');
     if (sel) {
         const opt = sel.querySelector(`option[value="${CSS.escape(name)}"]`);
@@ -2183,13 +2360,17 @@ function _deleteCustomHDRI(name) {
             if (fallback) { sel.value = fallback; builder.setHDRI(fallback); }
         }
     }
-}
 
-function _deleteCustomBG(name) {
-    const ci = customCatalogues.bg.findIndex(e => e.name === name);
-    if (ci >= 0) customCatalogues.bg.splice(ci, 1);
-    const pi = PRESETS.BG_CATALOGUE.findIndex(e => e.name === name);
-    if (pi >= 0) PRESETS.BG_CATALOGUE.splice(pi, 1);
+    // Clear any model slot referencing this texture
+    for (const layer of builder.layers) {
+        for (const obj of layer.objects ?? []) {
+            if (obj.type !== 'model') continue;
+            for (const slot of ['colorMap', 'roughnessMap', 'metalnessMap', 'normalMap']) {
+                if (obj[slot] === name) obj[slot] = null;
+            }
+        }
+    }
+    for (const fn of _textureSlotRefreshers) { try { fn(); } catch {} }
 }
 
 function _deleteCustomVideo(name) {
@@ -2251,6 +2432,76 @@ function _renderResourceSection(parent, title, items, getName, onDelete) {
     parent.appendChild(section);
 }
 
+// Texture picker popup — lists catalogue textures with thumbnails + a None tile.
+// opts: { current: string|null, onPick: (name|null) => void }
+function showTexturePickerPopup(opts) {
+    if (document.getElementById('texture-picker-popup-bg')) return;
+
+    const bg = document.createElement('div');
+    bg.className = 'popup-bg';
+    bg.id = 'texture-picker-popup-bg';
+
+    const popup = document.createElement('div');
+    popup.className = 'popup texture-picker-popup';
+
+    const title = document.createElement('div');
+    title.className = 'h1 popup-title-text';
+    title.textContent = 'Choose a Texture';
+    popup.appendChild(title);
+
+    const grid = document.createElement('div');
+    grid.className = 'texture-picker-grid';
+
+    const mkTile = (name, dataURL, isNone) => {
+        const tile = document.createElement('div');
+        tile.className = 'texture-tile' + (name === opts.current ? ' selected' : '');
+        const thumb = document.createElement('div');
+        thumb.className = 'texture-tile-thumb';
+        if (isNone) {
+            thumb.classList.add('none');
+            thumb.textContent = '∅';
+        } else {
+            thumb.style.backgroundImage = `url(${dataURL})`;
+        }
+        const lbl = document.createElement('div');
+        lbl.className = 'texture-tile-label';
+        lbl.textContent = name ?? 'None';
+        tile.appendChild(thumb);
+        tile.appendChild(lbl);
+        tile.addEventListener('click', () => {
+            opts.onPick(isNone ? null : name);
+            bg.remove();
+        });
+        return tile;
+    };
+
+    grid.appendChild(mkTile('None', null, true));
+    // Picker shows every available texture — built-in BGs/HDRIs and imports.
+    const all = [...PRESETS.BG_CATALOGUE, ...PRESETS.TEXTURE_CATALOGUE, ...PRESETS.HDRI_CATALOGUE];
+    for (const t of all) grid.appendChild(mkTile(t.name, t.path, false));
+    popup.appendChild(grid);
+
+    if (all.length === 0) {
+        const hint = document.createElement('div');
+        hint.className = 'texture-picker-hint';
+        hint.textContent = 'No textures yet — drop an image onto the viewport to import.';
+        popup.appendChild(hint);
+    }
+
+    const btnBox = document.createElement('div');
+    btnBox.className = 'popup-button-box';
+    const closeBtn = document.createElement('div');
+    closeBtn.className = 'big-Btn';
+    closeBtn.textContent = 'Cancel';
+    closeBtn.addEventListener('click', () => bg.remove());
+    btnBox.appendChild(closeBtn);
+    popup.appendChild(btnBox);
+
+    bg.addEventListener('click', e => { if (e.target === bg) bg.remove(); });
+    bg.appendChild(popup);
+    document.body.appendChild(bg);
+}
+
 function showResourcesPopup() {
     if (document.getElementById('resources-popup-bg')) return;
 
@@ -2273,12 +2524,9 @@ function showResourcesPopup() {
         _renderResourceSection(body, 'Audio Tracks', allTracks,
             t => t.name,
             async t => { await _deleteAudioTrack(t); render(); });
-        _renderResourceSection(body, 'HDRI', customCatalogues.hdri,
+        _renderResourceSection(body, 'Textures', customCatalogues.textures,
             e => e.name,
-            async e => { _deleteCustomHDRI(e.name); await saveAllToDB(); render(); });
-        _renderResourceSection(body, 'Background Images', customCatalogues.bg,
-            e => e.name,
-            async e => { _deleteCustomBG(e.name); await saveAllToDB(); render(); });
+            async e => { _deleteCustomTexture(e.name); await saveAllToDB(); render(); });
         _renderResourceSection(body, 'Video', customCatalogues.video,
             e => e.name,
             async e => { _deleteCustomVideo(e.name); await saveAllToDB(); render(); });
@@ -2294,9 +2542,8 @@ function showResourcesPopup() {
                 }
             });
 
-        const total = allTracks.length + customCatalogues.hdri.length
-            + customCatalogues.bg.length + customCatalogues.video.length
-            + customCatalogues.model.length;
+        const total = allTracks.length + customCatalogues.textures.length
+            + customCatalogues.video.length + customCatalogues.model.length;
         if (total === 0) {
             const empty = document.createElement('div');
             empty.className = 'resources-empty';
@@ -2677,16 +2924,19 @@ function renderPPLayerProperties(ppLayer) {
             animBtn.textContent = '●';
             animBtn.title = 'Animate (audio sync)';
             const refresh = () => {
-                const on = !!ppLayer.propertyBindings[def.key];
+                const on = _isAnimated(ppLayer.propertyBindings[def.key]);
                 animBtn.classList.toggle('active', on);
                 slider.disabled = on;
                 num.disabled    = on;
                 rowEl.classList.toggle('animated', on);
             };
             refresh();
+            animBtn.title = 'Animate (open editor)';
             animBtn.addEventListener('click', () => {
-                toggleAnimatedProperty(ppLayer.id, def.key, def.label, range,
-                    { isPP: true, ppContextId });
+                showAnimEditorPopup({
+                    objectId: ppLayer.id, key: def.key, label: def.label, range,
+                    isPP: true, ppContextId, showKeyOverride: false,
+                });
             });
             _ppAnimBtnRefreshers.push(refresh);
             wrap.appendChild(animBtn);
@@ -2694,9 +2944,12 @@ function renderPPLayerProperties(ppLayer) {
             const keyBtn = document.createElement('div');
             keyBtn.className = 'prop-keymap-btn';
             keyBtn.textContent = '⌨';
-            keyBtn.title = 'Map to key / MIDI (opens in Animation panel)';
+            keyBtn.title = 'Animate + map to key / MIDI';
             keyBtn.addEventListener('click', () => {
-                addKeyMapEntry(ppLayer.id, def.key, def.label, range, { isPP: true, ppContextId });
+                showAnimEditorPopup({
+                    objectId: ppLayer.id, key: def.key, label: def.label, range,
+                    isPP: true, ppContextId, showKeyOverride: true,
+                });
             });
             wrap.appendChild(keyBtn);
 
@@ -3165,6 +3418,7 @@ function renderObjectProperties(obj, layer) {
     const panel = document.getElementById('object-properties');
     panel.innerHTML = '';
     _animBtnRefreshers.length = 0;
+    _textureSlotRefreshers.length = 0;
 
     const save = () => saveAllToDB();
 
@@ -3190,17 +3444,22 @@ function renderObjectProperties(obj, layer) {
         h.appendChild(arrow);
         panel.appendChild(h);
 
+        const stateKey = `${obj.id}::${title}`;
+        const open = _objSectionsOpen.has(stateKey);
+
         const content = document.createElement('div');
         content.className = 'prop-section-content';
-        content.style.display = 'none';        // collapsed by default
+        content.style.display = open ? '' : 'none';
         panel.appendChild(content);
 
-        arrow.style.transform = 'rotate(-90deg)'; // start pointing right (collapsed)
+        arrow.style.transform = open ? '' : 'rotate(-90deg)';
 
         h.addEventListener('click', () => {
             const collapsed = content.style.display === 'none';
             content.style.display = collapsed ? '' : 'none';
             arrow.style.transform = collapsed ? '' : 'rotate(-90deg)';
+            if (collapsed) _objSectionsOpen.add(stateKey);
+            else           _objSectionsOpen.delete(stateKey);
         });
 
         currentSection = content;
@@ -3355,17 +3614,19 @@ function renderObjectProperties(obj, layer) {
             const panelObjId = selectedObject.id;
             const refresh = () => {
                 if (!selectedObject || selectedObject.id !== panelObjId) return;
-                const on = isPropertyAnimated(panelObjId, ownerKey);
+                const on = _isAnimated(binding);
                 animBtn.classList.toggle('active', on);
                 cSlider.disabled = on;
                 cNum.disabled    = on;
                 valueRow.classList.toggle('animated', on);
             };
             refresh();
+            animBtn.title = 'Animate (open editor)';
             animBtn.addEventListener('click', () => {
-                const nowOn = !isPropertyAnimated(panelObjId, ownerKey);
-                binding.mode = nowOn ? 'audio' : 'constant';
-                toggleAnimatedProperty(panelObjId, ownerKey, label, range);
+                showAnimEditorPopup({
+                    objectId: panelObjId, key: ownerKey, label, range,
+                    isPP: false, showKeyOverride: false,
+                });
             });
             _animBtnRefreshers.push(refresh);
             wrap.appendChild(animBtn);
@@ -3373,9 +3634,12 @@ function renderObjectProperties(obj, layer) {
             const keyBtn = document.createElement('div');
             keyBtn.className = 'prop-keymap-btn';
             keyBtn.textContent = '⌨';
-            keyBtn.title = 'Map to key / MIDI (opens in Animation panel)';
+            keyBtn.title = 'Animate + map to key / MIDI';
             keyBtn.addEventListener('click', () => {
-                addKeyMapEntry(panelObjId, ownerKey, label, range);
+                showAnimEditorPopup({
+                    objectId: panelObjId, key: ownerKey, label, range,
+                    isPP: false, showKeyOverride: true,
+                });
             });
             wrap.appendChild(keyBtn);
         }
@@ -3446,7 +3710,7 @@ function renderObjectProperties(obj, layer) {
         let syncMatVisibility = (type = obj.materialType) => {
             const std = type === 'standard';
             const nor = type === 'normal';
-            const hideColor = std && obj.useMapTexture;
+            const hideColor = std && !!obj.colorMap;
             if (opacityRowRef)    opacityRowRef.style.display    = nor   ? 'none' : '';
             if (smoothRowRef)     smoothRowRef.style.display     = nor   ? 'none' : '';
             if (colorRowRef)      colorRowRef.style.display      = hideColor ? 'none' : '';
@@ -3458,9 +3722,9 @@ function renderObjectProperties(obj, layer) {
             if (fbxMetalRowRef)   fbxMetalRowRef.style.display   = std   ? '' : 'none';
             if (fbxNormalRowRef)  fbxNormalRowRef.style.display  = std   ? '' : 'none';
             if (roughnessRowRef)  roughnessRowRef.style.display  =
-                std && !obj.useRoughnessMapTexture ? '' : 'none';
+                std && !obj.roughnessMap ? '' : 'none';
             if (metalnessRowRef)  metalnessRowRef.style.display  =
-                std && !obj.useMetalnessMapTexture ? '' : 'none';
+                std && !obj.metalnessMap ? '' : 'none';
         };
 
         currentSection.appendChild(createPreviewArea('material', obj.materialType, v => {
@@ -3514,36 +3778,48 @@ function renderObjectProperties(obj, layer) {
         crRowRef.appendChild(crInp);
         (currentSection || panel).appendChild(sensitivityRow);
 
-        // ── FBX texture toggles (standard only) ─────────────────
-        fbxMapRowRef = row('FBX Color Texture');
-        { const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'prop-checkbox';
-          cb.checked = obj.useMapTexture;
-          cb.addEventListener('change', () => { obj.useMapTexture = cb.checked; syncMatVisibility(); save(); });
-          fbxMapRowRef.appendChild(cb); fbxMapRowRef.style.display = isStandard() ? '' : 'none'; }
-
-        fbxRoughRowRef = row('FBX Roughness Texture');
-        { const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'prop-checkbox';
-          cb.checked = obj.useRoughnessMapTexture;
-          cb.addEventListener('change', () => { obj.useRoughnessMapTexture = cb.checked; syncMatVisibility(); save(); });
-          fbxRoughRowRef.appendChild(cb); fbxRoughRowRef.style.display = isStandard() ? '' : 'none'; }
-
-        fbxMetalRowRef = row('FBX Metalness Texture');
-        { const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'prop-checkbox';
-          cb.checked = obj.useMetalnessMapTexture;
-          cb.addEventListener('change', () => { obj.useMetalnessMapTexture = cb.checked; syncMatVisibility(); save(); });
-          fbxMetalRowRef.appendChild(cb); fbxMetalRowRef.style.display = isStandard() ? '' : 'none'; }
-
-        fbxNormalRowRef = row('FBX Normal Map');
-        { const cb = document.createElement('input'); cb.type = 'checkbox'; cb.className = 'prop-checkbox';
-          cb.checked = obj.useNormalMapTexture;
-          cb.addEventListener('change', () => { obj.useNormalMapTexture = cb.checked; syncMatVisibility(); save(); });
-          fbxNormalRowRef.appendChild(cb); fbxNormalRowRef.style.display = isStandard() ? '' : 'none'; }
+        // ── Texture slots (standard only) ────────────────────────
+        // Each slot is a button that opens a picker popup. The button text
+        // shows the current texture name (or "None"); disabled when the
+        // catalogue is empty.
+        const mkTextureRow = (label, slotField) => {
+            const r = row(label);
+            const btn = document.createElement('div');
+            btn.className = 'Btn texture-slot-btn';
+            const sync = () => { btn.textContent = obj[slotField] || 'None'; };
+            sync();
+            // Re-label the button when the catalogue gains a new texture (e.g. after
+            // an FBX with embedded textures finishes loading) — also re-sync the
+            // material visibility because the slot value may have been auto-assigned.
+            _textureSlotRefreshers.push(() => { sync(); syncMatVisibility(); });
+            btn.addEventListener('click', () => {
+                showTexturePickerPopup({
+                    current: obj[slotField],
+                    onPick: (name) => {
+                        obj[slotField] = name;
+                        sync();
+                        syncMatVisibility();
+                        save();
+                    },
+                });
+            });
+            r.appendChild(btn);
+            return r;
+        };
+        fbxMapRowRef    = mkTextureRow('Color Texture',     'colorMap');
+        fbxRoughRowRef  = mkTextureRow('Roughness Texture', 'roughnessMap');
+        fbxMetalRowRef  = mkTextureRow('Metalness Texture', 'metalnessMap');
+        fbxNormalRowRef = mkTextureRow('Normal Map',        'normalMap');
+        fbxMapRowRef.style.display    = isStandard() ? '' : 'none';
+        fbxRoughRowRef.style.display  = isStandard() ? '' : 'none';
+        fbxMetalRowRef.style.display  = isStandard() ? '' : 'none';
+        fbxNormalRowRef.style.display = isStandard() ? '' : 'none';
 
         roughnessRowRef = bindingPanel('Roughness', obj.roughness, { min: 0, max: 1 });
-        roughnessRowRef.style.display = isStandard() && !obj.useRoughnessMapTexture ? '' : 'none';
+        roughnessRowRef.style.display = isStandard() && !obj.roughnessMap ? '' : 'none';
 
         metalnessRowRef = bindingPanel('Metalness', obj.metalness, { min: 0, max: 1 });
-        metalnessRowRef.style.display = isStandard() && !obj.useMetalnessMapTexture ? '' : 'none';
+        metalnessRowRef.style.display = isStandard() && !obj.metalnessMap ? '' : 'none';
 
         smoothRowRef = row('Smooth Shading');
         const smoothInp = document.createElement('input');
@@ -3553,10 +3829,7 @@ function renderObjectProperties(obj, layer) {
         smoothRowRef.appendChild(smoothInp);
         smoothRowRef.style.display = isNormal() ? 'none' : '';
 
-        opacityRowRef = slider('Opacity', 0, 1, 0.01,
-            () => obj.opacity ?? 1,
-            v => { obj.opacity = v; }
-        );
+        opacityRowRef = bindingPanel('Opacity', obj.opacity, { min: 0, max: 1 });
         opacityRowRef.style.display = isNormal() ? 'none' : '';
 
         const wireLineWidthRowRef = slider('Wire Line Width', 1, 20, 0.1,
@@ -3692,10 +3965,7 @@ function renderObjectProperties(obj, layer) {
             v => { obj.lineWidth = v; }
         );
 
-        slider('Opacity', 0, 1, 0.01,
-            () => obj.opacity ?? 0.5,
-            v => { obj.opacity = v; }
-        );
+        bindingPanel('Opacity', obj.opacity, { min: 0, max: 1 });
 
         obj.sampleCount = 100;
 
@@ -3750,7 +4020,7 @@ function renderObjectProperties(obj, layer) {
             }));
         }
 
-        slider('Opacity', 0, 1, 0.01, () => obj.opacity ?? 1, v => { obj.opacity = v; });
+        bindingPanel('Opacity', obj.opacity, { min: 0, max: 1 });
 
         section('Audio Scale');
         bindingPanel('Audio Scale', obj.audioScale);
@@ -3994,7 +4264,12 @@ document.getElementById('audio-file').addEventListener('change', async (e) => {
 let materialPreviews = generateMaterialPreviews();
 let modelPreviews    = generateModelPreviews();
 let ppPreviews;
-const bgPreviews = () => PRESETS.BG_CATALOGUE.map(e => ({ name: e.name, url: e.path }));
+// Background picker shows built-in BGs plus every imported texture — HDRI/BG/
+// material maps are interchangeable in this app.
+const bgPreviews = () => [
+    ...PRESETS.BG_CATALOGUE.map(e => ({ name: e.name, url: e.path })),
+    ...PRESETS.TEXTURE_CATALOGUE.map(e => ({ name: e.name, url: e.path })),
+];
 const videoPreviews = () => (PRESETS.VIDEO_CATALOGUE || []).map(e => ({ name: e.name, url: e.path, isVideo: true }));
 
 function createPreviewArea(type, currentValue, onChange) {
@@ -4072,11 +4347,13 @@ window.addEventListener('load', async () => {
         saveAllToDB();
     });
     const hdriSelect = document.getElementById('scene-hdri');
-    PRESETS.HDRI_CATALOGUE.forEach(e => {
+    // HDRI dropdown lists every available asset — built-in EXRs plus any
+    // imported textures (single unified catalogue).
+    for (const e of [...PRESETS.HDRI_CATALOGUE, ...PRESETS.TEXTURE_CATALOGUE]) {
         const o = document.createElement('option');
         o.value = o.textContent = e.name;
         hdriSelect.appendChild(o);
-    });
+    }
     hdriSelect.value = builder.selectedHDRI;
     hdriSelect.addEventListener('change', () => { builder.setHDRI(hdriSelect.value); saveAllToDB(); });
 
@@ -4298,7 +4575,11 @@ function animate(time) {
     builder.updateAudioData(analyser, Volume);
     _updateAudioMonitor(builder.audioData);
     _updateKeyMapMeters();
-    for (const fn of _audioInlineMeterUpdaters) fn(builder.audioData);
+    for (let i = _audioInlineMeterUpdaters.length - 1; i >= 0; i--) {
+        const u = _audioInlineMeterUpdaters[i];
+        if (!u.el.isConnected) { _audioInlineMeterUpdaters.splice(i, 1); continue; }
+        u.fn(builder.audioData);
+    }
     updateProgressBar();
     _drawWaveformPreview();
     _syncVideoToAudio();

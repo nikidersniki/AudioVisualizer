@@ -185,10 +185,11 @@ export class ModelObject extends SceneObject {
         this.wireframeLineWidth = 2;
         this.roughness    = new PropertyBinding(1);
         this.metalness    = new PropertyBinding(0);
-        this.useMapTexture          = true;
-        this.useRoughnessMapTexture = true;
-        this.useMetalnessMapTexture = true;
-        this.useNormalMapTexture    = true;
+        // Texture slot assignments — catalogue texture names (null = no map)
+        this.colorMap     = null;
+        this.roughnessMap = null;
+        this.metalnessMap = null;
+        this.normalMap    = null;
 
         // Displacement
         this.noiseType    = 'simplex'; // 'simplex' | 'perlin' | 'voronoi' | 'sine'
@@ -203,7 +204,7 @@ export class ModelObject extends SceneObject {
         this.spinSpeed    = new PropertyBinding(0);
         this.spinAxis     = '+y'; // '+x' | '-x' | '+y' | '-y' | '+z' | '-z'
 
-        this.opacity          = 1;
+        this.opacity          = new PropertyBinding(1);
         this.smoothShading    = true;
         this.colorReactive   = false;
         this.colorSensitivity = 0.5;
@@ -239,6 +240,7 @@ export class ModelObject extends SceneObject {
     static fromJSON(d) {
         const obj = new ModelObject();
         obj._restoreBindings(d);
+        if (typeof obj.opacity === 'number') obj.opacity = new PropertyBinding(obj.opacity);
         return obj;
     }
 }
@@ -296,7 +298,7 @@ export class WaveObject extends SceneObject {
         this.barSpacing  = new PropertyBinding(0.05); // bars / bars-both: distance between bar centers
         this.sampleCount = 100;                      // fixed freq-bin count
         this.lineWidth   = 5;                        // screen-space line width in pixels
-        this.opacity     = 0.5;
+        this.opacity     = new PropertyBinding(0.5);
         this.colorReactive   = false;
         this.colorSensitivity = 0.5;
     }
@@ -306,6 +308,7 @@ export class WaveObject extends SceneObject {
     static fromJSON(d) {
         const obj = new WaveObject();
         obj._restoreBindings(d);
+        if (typeof obj.opacity === 'number') obj.opacity = new PropertyBinding(obj.opacity);
         obj.sampleCount = 100;
         return obj;
     }
@@ -325,7 +328,7 @@ export class FillObject extends SceneObject {
         this.audioScale   = new PropertyBinding(1);
         this.spinSpeed    = new PropertyBinding(0);
         this.spinAxis     = '+z';
-        this.opacity      = 1;
+        this.opacity      = new PropertyBinding(1);
     }
 
     applyBindings(audioData) {
@@ -355,6 +358,7 @@ export class FillObject extends SceneObject {
     static fromJSON(d) {
         const obj = new FillObject();
         obj._restoreBindings(d);
+        if (typeof obj.opacity === 'number') obj.opacity = new PropertyBinding(obj.opacity);
         obj.type = 'image'; // normalize old 'fill' saves
         return obj;
     }

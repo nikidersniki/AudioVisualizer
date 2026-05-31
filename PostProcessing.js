@@ -454,6 +454,62 @@ export const PP_SHADER_REGISTRY = {
             u.uKeepColors.value = props.keepColors ? 1.0 : 0.0;
         },
     },
+
+    flare: {
+        name:         'Lens Flare',
+        vertexPath:   './shaders/vertex.glsl',
+        fragmentPath: './shaders/flare.glsl',
+        _vertSrc: null,
+        _fragSrc: null,
+        defaultProperties: {
+            threshold:      0.7,
+            intensity:      1.0,
+            ghosts:         4,
+            ghostDispersal: 0.3,
+            haloWidth:      0.45,
+            streakLength:   0.6,
+            chromatic:      6.0,
+            tint:           '#a8c8ff',
+        },
+        propertyDefs: [
+            { key: 'threshold',      label: 'Threshold',  type: 'slider', min: 0,   max: 1,   step: 0.01 },
+            { key: 'intensity',      label: 'Intensity',  type: 'slider', min: 0,   max: 3,   step: 0.01 },
+            { key: 'ghosts',         label: 'Ghosts',     type: 'slider', min: 1,   max: 8,   step: 1    },
+            { key: 'ghostDispersal', label: 'Dispersal',  type: 'slider', min: 0,   max: 1,   step: 0.01 },
+            { key: 'haloWidth',      label: 'Halo',       type: 'slider', min: 0,   max: 1,   step: 0.01 },
+            { key: 'streakLength',   label: 'Streak',     type: 'slider', min: 0,   max: 1,   step: 0.01 },
+            { key: 'chromatic',      label: 'Chromatic',  type: 'slider', min: 0,   max: 30,  step: 0.1  },
+            { key: 'tint',           label: 'Tint',       type: 'color'                                  },
+        ],
+        buildUniforms(props, w, h) {
+            return {
+                tDiffuse:        { value: null },
+                iResolution:     { value: new Vector2(w, h) },
+                uThreshold:      { value: props.threshold },
+                uIntensity:      { value: props.intensity },
+                uGhostDispersal: { value: props.ghostDispersal },
+                uHaloWidth:      { value: props.haloWidth },
+                uStreakLength:   { value: props.streakLength },
+                uChromatic:      { value: props.chromatic },
+                uTint:           { value: new Color(props.tint) },
+            };
+        },
+        // Ghost count must be a compile-time constant — patch it into the source.
+        patchFragmentSrc(src, props) {
+            const n = Math.max(1, Math.min(8, Math.round(props.ghosts)));
+            return src.replace(/const int NUM_GHOSTS\s*=\s*\d+\s*;/, `const int NUM_GHOSTS = ${n};`);
+        },
+        updateUniforms(u, props, _time, w, h) {
+            u.iResolution.value.set(w, h);
+            u.uThreshold.value    = props.threshold;
+            u.uIntensity.value    = props.intensity;
+            u.uGhostDispersal.value = props.ghostDispersal;
+            u.uHaloWidth.value    = props.haloWidth;
+            u.uStreakLength.value = props.streakLength;
+            u.uChromatic.value    = props.chromatic;
+            u.uTint.value.set(props.tint);
+        },
+    },
 };
 
 // Load all shader GLSL sources from disk — call once at app startup
