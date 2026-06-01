@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/golden-layout@2.6.0/dist/css/themes/goldenlayout-dark-theme.css">
     <script type="module" src="main.js"></script>
     <script type="module" src="gl-ui.js"></script>
-    <link rel="stylesheet" type="text/css" href="style.css">
+    <link rel="stylesheet" type="text/css" href="styles/index.css">
   </head>
   <body>
     <header>
@@ -17,35 +17,35 @@
         <input type="file" id="file-input" accept=".json" style="display:none">
         <input type="file" id="resource-input" accept="image/*,video/*,audio/*,.fbx,.obj" multiple style="display:none">
         <div id="file-menu" class="Btn-dropdown">
-          <div id="file-menu-btn" class="Btn">File ▾</div>
+          <div id="file-menu-btn" class="Btn"><span class="header-btn-icon header-icon-file"></span>File ▾</div>
           <div id="file-menu-list">
-            <div id="file-new" class="windows-menu-item">New Project</div>
-            <div id="file-open" class="windows-menu-item">Open Project</div>
-            <div id="file-load-preset" class="windows-menu-item">Load Preset…</div>
-            <div id="file-save" class="windows-menu-item">Save Project</div>
+            <div id="file-new" class="windows-menu-item"><span class="windows-menu-icon menu-icon-new"></span>New Project</div>
+            <div id="file-open" class="windows-menu-item"><span class="windows-menu-icon menu-icon-open"></span>Open Project</div>
+            <div id="file-load-preset" class="windows-menu-item"><span class="windows-menu-icon menu-icon-preset"></span>Load Preset…</div>
+            <div id="file-save" class="windows-menu-item"><span class="windows-menu-icon menu-icon-save"></span>Save Project</div>
             <div class="windows-menu-sep"></div>
-            <div id="manage-resources" class="windows-menu-item">Resources…</div>
+            <div id="manage-resources" class="windows-menu-item"><span class="windows-menu-icon menu-icon-resources"></span>Resources…</div>
           </div>
         </div>
         <div id="windows-menu" class="Btn-dropdown">
-          <div id="windows-menu-btn" class="Btn">Windows ▾</div>
+          <div id="windows-menu-btn" class="Btn"><span class="header-btn-icon header-icon-windows"></span>Windows ▾</div>
           <div id="windows-menu-list"></div>
         </div>
         <div id="layout-menu" class="Btn-dropdown">
-          <div id="layout-menu-btn" class="Btn">Layout ▾</div>
+          <div id="layout-menu-btn" class="Btn"><span class="header-btn-icon header-icon-layout"></span>Layout ▾</div>
           <div id="layout-menu-list"></div>
         </div>
-        <a id="help-btn" class="Btn" href="docs/" target="_blank" rel="noopener">Help</a>
-        <div id="about-btn" class="Btn">About</div>
+        <a id="help-btn" class="Btn" href="docs/" target="_blank" rel="noopener"><span class="header-btn-icon header-icon-help"></span>Help</a>
+        <div id="about-btn" class="Btn"><span class="header-btn-icon header-icon-about"></span>About</div>
       </div>
       <div class="h2">Revisualize 3D</div>
     </header>
     <div id="gl-container"></div>
-    <div id="gizmo-mode-switch">
+    <div id="gizmo-mode-switch" class="tab-switch">
       <div id="gizmo-mode-pill"></div>
-      <div id="gizmo-mode-translate" class="gizmo-mode-tab selected" data-shortcut="T">Move</div>
-      <div id="gizmo-mode-rotate"    class="gizmo-mode-tab"          data-shortcut="R">Rotate</div>
-      <div id="gizmo-mode-scale"     class="gizmo-mode-tab"          data-shortcut="S">Scale</div>
+      <div id="gizmo-mode-translate" class="tab selected" data-shortcut="T">Move</div>
+      <div id="gizmo-mode-rotate"    class="tab"          data-shortcut="R">Rotate</div>
+      <div id="gizmo-mode-scale"     class="tab"          data-shortcut="S">Scale</div>
     </div>
     <main>
       <div id="drag-drop"></div>
@@ -57,7 +57,7 @@
           <div id="progress-fill"></div>
         </div>
         <div id="playback-row">
-          <div id="pause-btn">▶</div>
+          <div id="pause-btn"></div>
           <div id="time-display">
             <span id="current-time">0:00</span> / <span id="duration">0:00</span>
           </div>
@@ -68,24 +68,21 @@
         <div id="track-name">No Track Loaded</div>
       </div>
 
-      <div id="project-settings">
-        <div id="scene-settings">
-          <div class="h2 prop-section-title prop-section-collapsible" id="scene-settings-header">
-            <span>Scene Settings</span><span class="prop-section-arrow" style="transform:rotate(-90deg)">▾</span>
-          </div>
-          <div id="scene-settings-body" style="display:none">
-            <div class="prop-row">
-              <label class="prop-label">Background</label>
-              <input type="color" id="scene-clear-color" value="#000000" class="prop-color">
-            </div>
-            <div class="prop-row">
-              <label class="prop-label">HDRI</label>
-              <select id="scene-hdri" class="prop-select"></select>
-            </div>
-          </div>
+      <div id="controlls">
+        <div id="settings-tab-switch" class="tab-switch">
+          <div id="settings-tab-pill"></div>
+          <div id="settings-tab-scene"  class="tab selected">Scene</div>
+          <div id="settings-tab-system" class="tab">System</div>
         </div>
-        <div id="viewport-settings">
-          <div class="h2 prop-section-title">Viewport</div>
+        <div id="settings-scene-pane">
+          <div class="prop-row">
+            <label class="prop-label">Background</label>
+            <input type="color" id="scene-clear-color" value="#000000" class="prop-color">
+          </div>
+          <div class="prop-row">
+            <label class="prop-label">HDRI</label>
+            <select id="scene-hdri" class="prop-select"></select>
+          </div>
           <div class="prop-row">
             <label class="prop-label">Fixed Aspect</label>
             <input type="checkbox" id="viewport-fixed-toggle">
@@ -101,28 +98,28 @@
               <option value="1:1">1:1</option>
             </select>
           </div>
+        </div>
+        <div id="settings-system-pane" style="display:none">
+          <div class="prop-row">
+            <label class="prop-label">Audio Volume</label>
+            <input type="range" id="audio-volume" min="0" max="3" step="0.05" value="1">
+          </div>
           <div class="prop-row">
             <label class="prop-label">Debug HUD</label>
             <input type="checkbox" id="viewport-debug-toggle">
           </div>
-        </div>
-      </div>
-
-      <div id="controlls">
-        <label>Audio Volume
-          <input type="range" id="audio-volume" min="0" max="3" step="0.05" value="1">
-        </label>
-        <div id="theme-section">
-          <div class="h2 prop-section-title prop-section-collapsible" id="theme-section-header">
-            <span>Theme</span><span class="prop-section-arrow" style="transform:rotate(-90deg)">▾</span>
+          <div id="theme-section">
+            <div class="h2 prop-section-title prop-section-collapsible" id="theme-section-header">
+              <span>Theme</span><span class="prop-section-arrow" style="transform:rotate(-90deg)">▾</span>
+            </div>
+            <div id="theme-section-body" style="display:none"></div>
           </div>
-          <div id="theme-section-body" style="display:none"></div>
         </div>
-        <div id="editorSwitch">
+        <div id="editorSwitch" class="tab-switch">
           <div id="editor-switch-pill"></div>
-          <div id="oe-btn" class="switch-tab selected">Object Editor</div>
-          <div id="pp-editor" class="switch-tab">Post Processing</div>
-          <div id="anim-btn" class="switch-tab">Animation</div>
+          <div id="oe-btn"    class="tab selected">Object Editor</div>
+          <div id="pp-editor" class="tab">Post Processing</div>
+          <div id="anim-btn"  class="tab">Animation</div>
         </div>
         <div id="layers">
           <div id="layer-header">
@@ -132,16 +129,15 @@
           <div id="layer-list"></div>
         </div>
         <div id="current-layer-controls">
-          <div class="h2">Layer Controls</div>
           <div id="layerTopButtons"></div>
           <div id="object-list"></div>
           <div id="object-properties"></div>
         </div>
         <div id="pp-section" style="display:none">
-          <div id="pp-tab-switch">
+          <div id="pp-tab-switch" class="tab-switch">
             <div id="pp-tab-pill"></div>
-            <div id="pp-tab-global" class="pp-tab selected">Global</div>
-            <div id="pp-tab-layer"  class="pp-tab is-disabled">Layer: —</div>
+            <div id="pp-tab-global" class="tab selected">Global</div>
+            <div id="pp-tab-layer"  class="tab is-disabled">Layer: —</div>
           </div>
           <div class="h2" id="pp-context-title">Global</div>
           <div id="pp-top-buttons"></div>
@@ -149,10 +145,10 @@
           <div id="pp-layer-properties"></div>
         </div>
         <div id="anim-section" style="display:none">
-          <div id="anim-tab-switch">
+          <div id="anim-tab-switch" class="tab-switch">
             <div id="anim-tab-pill"></div>
-            <div id="anim-tab-obj" class="anim-tab selected">Objects</div>
-            <div id="anim-tab-pp"  class="anim-tab">Post Processing</div>
+            <div id="anim-tab-obj" class="tab selected">Objects</div>
+            <div id="anim-tab-pp"  class="tab">Post Processing</div>
           </div>
           <div id="anim-list"></div>
         </div>

@@ -1,0 +1,41 @@
+.image-button {
+    position: relative;
+    width: 20px; height: 20px;
+    background-color: var(--bg-lift);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+    opacity: 0.55;
+    transition: opacity 0.12s, background-color 0.12s;
+    flex-shrink: 0;
+}
+.image-button:hover { opacity: 1; background-color: var(--bg-hover); }
+
+/* SVG icon in ::before as a mask. `background-color` provides the fill,
+   so the icon recolours via --icon-color without tinting border/background. */
+.image-button::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-color: var(--icon-color);
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: 13px;
+    -webkit-mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-size: 13px;
+    mask-image: var(--icon-src);
+    -webkit-mask-image: var(--icon-src);
+}
+
+#add-layer        { --icon-src: url('/Graphics/plus-svgrepo-com.svg'); }
+.move-up          { --icon-src: url('/Graphics/arrowup-svgrepo-com.svg'); }
+.move-down        { --icon-src: url('/Graphics/arrowdown-svgrepo-com.svg'); }
+.remove-layer     { --icon-src: url('/Graphics/minus-svgrepo-com.svg'); }
+.duplicate-object { --icon-src: url('/Graphics/duplicate-svgrepo-com.svg'); }
+
+.obj-btn-group {
+    display: flex;
+    gap: 2px;
+    flex-shrink: 0;
+}

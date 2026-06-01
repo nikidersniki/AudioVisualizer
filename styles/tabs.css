@@ -1,0 +1,94 @@
+/* Shared tab switch (used by editorSwitch, settings, pp, anim, gizmo) */
+.tab-switch {
+    position: relative;
+    display: flex;
+    margin: 6px 8px;
+    padding: 4px;
+    background: var(--bg-lift);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    white-space: nowrap;
+}
+.tab-switch > [id$="-pill"] {
+    position: absolute;
+    top: 2px; bottom: 2px;
+    left: 2px;
+    width: calc(50% - 2px); /* 2-tab default; 3-tab switches override below */
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    transition: left 0.18s ease;
+    pointer-events: none;
+}
+.tab {
+    flex: 1;
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 5px;
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    color: var(--text-dim);
+    border-radius: var(--radius);
+    transition: color 0.18s;
+    user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.tab.selected     { color: var(--accent); }
+.tab.is-disabled  { opacity: 0.4; pointer-events: none; }
+
+/* 2-tab pill positions */
+#pp-tab-switch:has(#pp-tab-layer.selected)              #pp-tab-pill       { left: 50%; }
+#anim-tab-switch:has(#anim-tab-pp.selected)             #anim-tab-pill     { left: 50%; }
+#settings-tab-switch:has(#settings-tab-system.selected) #settings-tab-pill { left: 50%; }
+
+/* 3-tab pill positions */
+#editor-switch-pill, #gizmo-mode-pill { width: calc(33.333% - 2px); }
+#editorSwitch:has(#pp-editor.selected)                 #editor-switch-pill { left: 33.333%; }
+#editorSwitch:has(#anim-btn.selected)                  #editor-switch-pill { left: 66.666%; }
+#gizmo-mode-switch:has(#gizmo-mode-rotate.selected)    #gizmo-mode-pill    { left: 33.333%; }
+#gizmo-mode-switch:has(#gizmo-mode-scale.selected)     #gizmo-mode-pill    { left: 66.666%; }
+
+/* Gizmo mode switch (top of viewport) — overrides shared .tab-switch */
+#gizmo-mode-switch {
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 100;
+    margin: 0;
+    padding: 2px;
+    background: var(--pannel-bg);
+    backdrop-filter: var(--panel-blur);
+    height: 26px;
+    pointer-events: auto;
+}
+#gizmo-mode-switch > #gizmo-mode-pill { top: 1px; bottom: 1px; left: 1px; }
+#gizmo-mode-switch > .tab {
+    flex: 1 1 0;
+    min-width: 90px;
+    padding: 0 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    letter-spacing: 0.04em;
+}
+#gizmo-mode-switch > .tab::after {
+    content: '[' attr(data-shortcut) ']';
+    font-size: 0.6rem;
+    color: var(--text-faint);
+    opacity: 0;
+    max-width: 0;
+    overflow: hidden;
+    transition: opacity 0.15s ease, max-width 0.15s ease;
+}
+#gizmo-mode-switch > .tab:hover::after {
+    opacity: 1;
+    max-width: 30px;
+}

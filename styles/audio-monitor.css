@@ -1,0 +1,119 @@
+#audio-monitor {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    overflow-y: auto;
+    height: 100%;
+    box-sizing: border-box;
+}
+#audio-spectrum, #audio-waveform {
+    width: 100%;
+    height: auto;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    display: block;
+}
+#audio-beat-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    padding: 2px 4px;
+}
+#audio-beat-dot {
+    color: var(--text-dim);
+    opacity: 0.45;
+    font-size: 1.1rem;
+    line-height: 1;
+    transition: color 0.05s, text-shadow 0.05s;
+}
+#audio-beat-dot.hit {
+    color: var(--accent);
+    opacity: 1;
+    text-shadow: 0 0 8px var(--accent), 0 0 16px var(--accent);
+}
+.audio-beat-label {
+    font-size: 0.62rem;
+    letter-spacing: 0.1em;
+    color: var(--text-faint);
+}
+#audio-bpm { margin-left: auto; color: var(--accent); }
+#audio-meters {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+}
+.audio-meter-cube-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+}
+.audio-meter-cube {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.audio-meter-cube-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 0;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-dim);
+    transition: height 0.04s linear;
+}
+.audio-meter-cube-label {
+    position: relative;
+    z-index: 1;
+    padding: 0 2px;
+    color: var(--text);
+    text-transform: uppercase;
+    font-weight: 700;
+    text-align: center;
+    line-height: 1;
+    word-break: break-word;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+/* Black copy clipped to the fill level (clip-path set per-frame in JS) */
+.audio-meter-cube-label.over {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #000;
+    text-shadow: none;
+    clip-path: inset(100% 0 0 0);
+}
+
+/* Inline mini-meter next to Source dropdown */
+.audio-mini-meter {
+    flex: 0 0 50px;
+    height: 6px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-left: 4px;
+}
+.audio-mini-meter > span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+    width: 0;
+}

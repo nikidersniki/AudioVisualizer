@@ -1,0 +1,389 @@
+@media (max-width: 768px) {
+    html, body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        -webkit-text-size-adjust: 100%;
+        touch-action: manipulation;
+    }
+
+    /* Header */
+    header {
+        height: auto;
+        min-height: 32px;
+        padding: 4px 6px;
+        flex-direction: column;
+        gap: 4px;
+    }
+    header .h2 {
+        font-size: 1.1rem;
+        order: -1;
+    }
+    #header-buttons {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 4px;
+        width: 100%;
+    }
+    #header-buttons .Btn {
+        font-size: 0.6rem;
+        padding: 4px 6px;
+    }
+
+    /* Mobile bottom drawer */
+    #mobile-drawer {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        /* Tall enough that "open" state rises right up to the gizmo controls. */
+        height: calc(100vh - 42px);
+        z-index: 10003;
+        background: var(--pannel-bg);
+        backdrop-filter: var(--panel-blur);
+        border-top: 1px solid var(--border-bright);
+        border-top-left-radius: 8px;
+        border-top-right-radius: 8px;
+        display: flex;
+        flex-direction: column;
+        /* JS sets inline transform per state (closed / half / open). */
+        transform: translateY(calc(100% - var(--peek, 76px)));
+        transition: transform 0.25s ease;
+        font-family: var(--font-mono);
+        color: var(--text);
+        --peek: 76px;
+    }
+    #drawer-handle {
+        height: 22px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: grab;
+        flex-shrink: 0;
+    }
+    #drawer-handle:active { cursor: grabbing; }
+    .drawer-grip {
+        width: 48px;
+        height: 4px;
+        border-radius: 2px;
+        background: var(--text-faint);
+        opacity: 0.6;
+    }
+    /* Tab row: scrollable list of pinned tabs + fixed + button on the right. */
+    #drawer-tabs-bar {
+        display: flex;
+        flex-direction: row;
+        align-items: stretch;
+        border-bottom: 1px solid var(--border);
+        flex-shrink: 0;
+        min-width: 0;
+    }
+    #drawer-tabs {
+        display: flex;
+        flex-direction: row;
+        flex: 1 1 0;
+        min-width: 0;
+        overflow-x: auto;
+        overflow-y: hidden;
+        scrollbar-width: none;
+        -webkit-overflow-scrolling: touch;
+    }
+    #drawer-tabs::-webkit-scrollbar { display: none; }
+    .drawer-tab {
+        flex: 0 0 auto;
+        text-align: center;
+        padding: 10px 12px;
+        font-size: 0.7rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        color: var(--text-dim);
+        cursor: pointer;
+        user-select: none;
+        border-bottom: 2px solid transparent;
+        transition: color 0.15s, border-color 0.15s;
+        white-space: nowrap;
+    }
+    .drawer-tab.selected {
+        color: var(--accent);
+        border-bottom-color: var(--accent);
+    }
+    #drawer-add-tab {
+        flex: 0 0 auto;
+        align-self: stretch;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1rem;
+        padding: 0 14px;
+        color: var(--text-faint);
+        cursor: pointer;
+        user-select: none;
+        border-left: 1px solid var(--border);
+    }
+    #drawer-add-tab:hover { color: var(--accent); }
+    #drawer-body {
+        flex: 1;
+        overflow-y: auto;
+        position: relative;
+    }
+    /* Pinnable windows live as direct children of #drawer-body. All hidden by
+       default; .mobile-active-tab on the chosen one wins (with !important)
+       over inline display:none that switchTab() may set on editor sections. */
+    body.mobile-mode #drawer-body > *  { display: none !important; }
+    body.mobile-mode #drawer-body > .mobile-active-tab { display: block !important; }
+    /* Strip desktop side-panel positioning so the panel fills the drawer. */
+    body.mobile-mode #drawer-body > * {
+        position: static !important;
+        top: auto !important; right: auto !important;
+        left: auto !important; bottom: auto !important;
+        width: 100% !important;
+        max-width: none !important;
+        min-width: 0 !important;
+        max-height: none !important;
+        border: none !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+        backdrop-filter: none !important;
+    }
+
+    /* Pin menu — checkbox list of pinnable windows, opens from + tab. */
+    #drawer-pin-menu {
+        position: absolute;
+        right: 6px;
+        top: calc(22px + var(--drawer-header-h, 0px) + var(--drawer-top-slot-h, 0px) + 40px);
+        background: var(--bg-panel);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 4px 0;
+        z-index: 2;
+        min-width: 180px;
+        display: none;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.4);
+    }
+    #drawer-pin-menu.open { display: block; }
+    .drawer-pin-menu-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 10px;
+        cursor: pointer;
+        font-size: 0.75rem;
+        font-family: var(--font-mono);
+    }
+    .drawer-pin-menu-item:hover { background: var(--bg-lift); }
+    .drawer-pin-menu-item input { pointer-events: none; }
+
+    /* Desktop <header> is relocated into the drawer in mobile mode. Strip its
+       absolute positioning so it sits in the drawer flex stack instead of
+       floating over the viewport / drawer handle. */
+    #drawer-header-slot { flex-shrink: 0; }
+    #drawer-header-slot header {
+        position: static !important;
+        z-index: auto !important;
+        height: auto !important;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 6px 10px;
+        border-bottom: 1px solid var(--border);
+        background: transparent;
+    }
+    #drawer-header-slot #header-buttons {
+        display: flex;
+        gap: 4px;
+        flex-wrap: wrap;
+    }
+    /* Hide Windows + Layout menus on mobile — pin tabs replace them. */
+    body.mobile-mode #windows-menu,
+    body.mobile-mode #layout-menu { display: none !important; }
+    /* Desktop editor pill (Object Editor / Post Processing / Animation) is
+       redundant when each is its own pin tab — hide it. */
+    body.mobile-mode #editorSwitch { display: none !important; }
+
+    .hide-button { display: none !important; }
+
+    /* Progress bar above drawer peek */
+    #progress-bar-container {
+        position: static;
+        background-color: transparent;
+        backdrop-filter: none;
+        border-top:0;
+        border-bottom: 1px solid var(--border);
+        padding: 24px 0 6px;
+        z-index: 10004;
+    }
+    #progress-bar {
+        position: static;
+        width: calc(100% - 12px);
+        margin: 0 6px;
+        left: auto;
+        right: auto;
+        bottom: auto;
+        height: 4px;
+    }
+    #pause-btn {
+        width: 22px;
+        height: 22px;
+        margin: 0 4px;
+    }
+    #now-playing {
+        display: block;
+        padding: 6px 10px 0;
+        text-align: center;
+    }
+    #track-name {
+        position: static;
+        font-size: 0.9rem;
+        bottom: auto;
+        width: auto;
+    }
+
+    /* Popup full screen */
+    .popup {
+        width: 96vw;
+        max-width: 96vw;
+        max-height: 90vh;
+    }
+    .popup-title-text {
+        font-size: 1.1rem;
+        padding: 10px 12px 8px;
+    }
+    .popup-input-box > div:not(.preview-grid):not(.preview-field) {
+        padding: 8px 12px;
+        flex-wrap: wrap;
+    }
+    .popup-input-box .h2 {
+        min-width: 0;
+        width: 100%;
+    }
+    .popup-input-box input,
+    .popup-input-box select {
+        width: 100%;
+        font-size: 0.85rem;
+        padding: 6px 8px;
+    }
+    .popup-button-box .big-Btn {
+        font-size: 0.75rem;
+        padding: 10px 8px;
+    }
+
+    /* Preview grid: bigger thumbs, fewer per row */
+    .preview-img {
+        width: 22vw;
+        max-width: 110px;
+    }
+    .preview-label {
+        font-size: 0.65rem;
+    }
+
+    /* Property rows wrap label above input */
+    .prop-row {
+        flex-wrap: wrap;
+        padding: 4px 8px;
+        min-height: 0;
+    }
+    .prop-label {
+        font-size: 0.7rem;
+        min-width: 0;
+        width: auto;
+    }
+    .prop-input,
+    .prop-select {
+        font-size: 0.8rem;
+        padding: 5px 6px;
+        min-height: 28px;
+    }
+    .prop-color {
+        width: 44px;
+        height: 28px;
+    }
+    .prop-checkbox {
+        width: 20px;
+        height: 20px;
+    }
+    .custom-slider {
+        height: 24px;
+    }
+    .custom-slider-value {
+        font-size: 0.75rem;
+    }
+
+    /* Buttons larger tap target */
+    .Btn {
+        font-size: 0.7rem;
+        padding: 6px 10px;
+    }
+    .big-Btn {
+        font-size: 0.85rem;
+        padding: 10px 12px;
+    }
+    .image-button {
+        width: 26px;
+        height: 26px;
+    }
+    .prop-animate-btn {
+        width: 24px;
+        height: 24px;
+        font-size: 0.8rem;
+    }
+
+    /* Tab switches: shrink slightly on mobile */
+    #editorSwitch > .tab {
+        font-size: 0.65rem;
+        padding: 7px 4px;
+    }
+
+    /* List buttons */
+    .list-button {
+        font-size: 0.75rem;
+        padding: 7px 8px;
+    }
+
+    /* Headings */
+    .h1 {
+        font-size: 1.2rem;
+        padding: 5px 8px 3px;
+    }
+
+    /* Drag drop overlay text smaller */
+    #drag-drop::after {
+        font-size: 1.8rem;
+        padding: 24px 32px;
+        letter-spacing: 0.15em;
+    }
+
+    /* Layer opacity slider tap area */
+    .layer-opacity-slider {
+        height: 6px;
+    }
+}
+
+/* Very narrow phones */
+@media (max-width: 420px) {
+    #controlls, #player {
+        width: 96vw;
+        max-width: 96vw;
+        max-height: 50vh;
+    }
+    #hide-controlls, #hide-player {
+        bottom: calc(50vh + 64px);
+    }
+    header .h2 {
+        font-size: 0.95rem;
+    }
+    #header-buttons .Btn {
+        font-size: 0.55rem;
+        padding: 3px 5px;
+    }
+}
+
+/* Touch device pointer hints */
+@media (hover: none) {
+    .Btn:hover,
+    .image-button:hover,
+    .list-button:hover,
+    .preview-item:hover {
+        background: inherit;
+    }
+}

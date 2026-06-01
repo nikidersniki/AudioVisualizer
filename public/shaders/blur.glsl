@@ -6,6 +6,14 @@ uniform float uRadius;
 varying vec2 vUv;
 
 void main() {
+    // Bail out when radius is effectively zero — exp(-x/0) yields NaN weights
+    // which cascade into NaN fragment colour and full-viewport flicker on the
+    // next pass. Also cheaper to just pass through.
+    if (uRadius < 0.001) {
+        gl_FragColor = texture2D(tDiffuse, vUv);
+        return;
+    }
+
     vec4 color = vec4(0.0);
     float total = 0.0;
 

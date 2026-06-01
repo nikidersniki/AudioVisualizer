@@ -1,0 +1,45 @@
+.Btn {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    padding: 3px 10px;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    height: 22px;
+    box-sizing: border-box;
+}
+.Btn:hover {
+    background: var(--accent);
+    color: var(--bg);
+}
+
+.big-Btn {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--bg);
+    background: var(--accent);
+    border: none;
+    border-radius: var(--radius);
+    padding: 8px 12px;
+    width: calc(100% - 20px);
+    margin: 4px 10px;
+    cursor: pointer;
+    text-align: center;
+    transition: filter 0.12s;
+    display: block;
+}
+.big-Btn:hover { filter: brightness(1.15); }

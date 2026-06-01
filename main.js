@@ -3,7 +3,7 @@ import {
 } from 'three';
 
 import { SceneBuilder, PRESETS}    from './SceneBuilder.js';
-import { Layer, ModelObject, PointLightObject, WaveObject, FillObject, PropertyBinding} from './Sceneobjects.js';
+import { Layer, ModelObject, PointLightObject, WaveObject, FillObject, TextObject, PropertyBinding} from './Sceneobjects.js';
 import { PP_SHADER_REGISTRY, PP_NATIVE_REGISTRY, PostProcessingLayer, PostProcessingPipeline, NativePassLayer, initShaders } from './PostProcessing.js';
 import {generateMaterialPreviews, generateModelPreviews, generatePPPreviews} from './PreviewRenderer.js';
 import { readID3Title } from './SoundNameReader.js';
@@ -548,12 +548,17 @@ function serializeAll() {
         ...layer.toJSON(),
         ppLayers: (ppContexts.get(layer.id)?.layers ?? []).map(l => l.toJSON()),
     }));
+    // Deep-clone customCatalogues / animatedProperties so the snapshot is a
+    // frozen point-in-time view. Without this, subsequent in-place edits to
+    // the live arrays (e.g. during preset thumbnail generation) would mutate
+    // the snapshot and lose data on restore.
     return [
         { id: 'global', name: 'Global', isGlobal: true, objects: [], ppLayers: globalPPLayers,
           bgColor: builder._bgColor, hdri: builder.selectedHDRI,
           syncedVideoObjId,
           glLayout: window.__GL_LAYOUT_JSON__ ?? null,
-          customCatalogues, animatedProperties },
+          customCatalogues: structuredClone(customCatalogues),
+          animatedProperties: structuredClone(animatedProperties) },
         ...sceneLayers,
     ];
 }
@@ -642,11 +647,23 @@ function _registerCustomVideo(name, dataURL) {
 }
 
 function _registerCustomModel(name, dataURL, format, scale) {
-    if (PRESETS.MODEL_CATALOGUE.find(e => e.name === name)) return;
     const fmt = (format ?? 'fbx').toLowerCase();
     const sc  = Array.isArray(scale) && scale.length === 3 ? scale : [0.01, 0.01, 0.01];
-    PRESETS.MODEL_CATALOGUE.push({ name, path: dataURL, scale: sc, format: fmt, isCustom: true });
-    customCatalogues.model.push({ name, dataURL, format: fmt, scale: sc });
+    // Update existing entry's path/format/scale rather than skipping — a stale
+    // catalogue entry left over from a previous session can otherwise outlive
+    // the data and break _loadMesh on the next deserialize.
+    const existingIdx = PRESETS.MODEL_CATALOGUE.findIndex(e => e.name === name);
+    if (existingIdx >= 0) {
+        PRESETS.MODEL_CATALOGUE[existingIdx] = { name, path: dataURL, scale: sc, format: fmt, isCustom: true };
+    } else {
+        PRESETS.MODEL_CATALOGUE.push({ name, path: dataURL, scale: sc, format: fmt, isCustom: true });
+    }
+    const ccIdx = customCatalogues.model.findIndex(e => e.name === name);
+    if (ccIdx >= 0) customCatalogues.model[ccIdx] = { name, dataURL, format: fmt, scale: sc };
+    else            customCatalogues.model.push({ name, dataURL, format: fmt, scale: sc });
+    // Cached parsed FBX from a previous session is stale relative to the new path
+    if (builder?._modelCache) delete builder._modelCache[name];
+    if (builder?._modelFBXTextures) delete builder._modelFBXTextures[name];
 }
 
 function _registerCustomTexture(name, dataURL) {
@@ -917,14 +934,9 @@ function _animKeyOverrideSection(binding, range, rerender) {
             [{ value: 'snap', label: 'Snap' }, { value: 'ramp', label: 'Ramp' }],
             binding.keyEase, v => { binding.keyEase = v; saveAllToDB(); rerender(); })));
     if (binding.keyEase === 'ramp') {
-        const fadeWrap = document.createElement('div');
-        fadeWrap.className = 'prop-slider-wrap';
-        const num = document.createElement('input');
-        num.type = 'number'; num.className = 'prop-number';
-        num.min = 0; num.step = 10; num.value = binding.keyFade;
-        num.addEventListener('input', () => { binding.keyFade = Math.max(0, parseFloat(num.value) || 0); saveAllToDB(); });
-        fadeWrap.appendChild(num);
-        wrap.appendChild(_animPropRow('Fade (ms)', fadeWrap));
+        wrap.appendChild(_animPropRow('Fade (ms)',
+            _animSliderControl(binding.keyFade, { min: 5, max: 5000 }, 1,
+                v => { binding.keyFade = Math.max(0, v); saveAllToDB(); })));
     }
 
     return wrap;
@@ -1100,8 +1112,10 @@ function showAnimEditorPopup(opts) {
 
     bg.addEventListener('click', e => { if (e.target === bg) cancel(); });
 
-    btnBox.appendChild(cancelBtn);
+    // Done first so it inherits the default accent style; Cancel last so the
+    // `:last-child` rule in popup.css strips it down to a muted ghost button.
     btnBox.appendChild(doneBtn);
+    btnBox.appendChild(cancelBtn);
     popup.appendChild(btnBox);
     bg.appendChild(popup);
     document.body.appendChild(bg);
@@ -1533,6 +1547,9 @@ if (newProjectBtn) {
         if (builder.layers.length > 0) selectLayer(builder.layers[0]);
         renderAnimationList();
         saveAllToDB();
+        // Every new project starts on the preset picker — closing the picker
+        // keeps the blank scene we just set up.
+        showPresetPicker({ canDismiss: true });
     });
 }
 const fileInput = document.getElementById('file-input');
@@ -1713,9 +1730,9 @@ async function showPresetPicker({ canDismiss = true } = {}) {
                 per-layer or globally.
             </p>
             <p class="muted">
-                Pick a preset below to explore — or
-                <a class="start-screen-link" id="start-screen-empty-link">start with an empty scene</a>.
-                You can also load your own <strong>.json</strong> project from the File menu.
+                Pick a preset below to explore — or choose <strong>Empty</strong> to start
+                from a blank scene. You can also load your own <strong>.json</strong>
+                project from the File menu.
             </p>
             <div class="start-screen-link-row">
                 <a class="start-screen-link" href="docs/" target="_blank" rel="noopener">Documentation ↗</a>
@@ -1727,6 +1744,20 @@ async function showPresetPicker({ canDismiss = true } = {}) {
 
     const grid = document.createElement('div');
     grid.className = 'preset-grid';
+
+    // "Empty" tile — start a blank scene without picking a preset.
+    const emptyCard = document.createElement('div');
+    emptyCard.className = 'preset-card preset-card-empty';
+    const emptyThumb = document.createElement('div');
+    emptyThumb.className = 'preset-card-thumb';
+    emptyThumb.textContent = '+';
+    const emptyLabel = document.createElement('div');
+    emptyLabel.className = 'preset-card-label';
+    emptyLabel.textContent = 'Empty';
+    emptyCard.appendChild(emptyThumb);
+    emptyCard.appendChild(emptyLabel);
+    emptyCard.addEventListener('click', () => bg.remove());
+    grid.appendChild(emptyCard);
 
     const cardEls = new Map();
     BUILTIN_PRESETS.forEach(name => {
@@ -1751,7 +1782,7 @@ async function showPresetPicker({ canDismiss = true } = {}) {
     buttonBox.className = 'popup-button-box';
     const dismissBtn = document.createElement('div');
     dismissBtn.className = 'big-Btn';
-    dismissBtn.textContent = canDismiss ? 'Close' : 'Start Empty';
+    dismissBtn.textContent = 'Close';
     dismissBtn.addEventListener('click', () => bg.remove());
     buttonBox.appendChild(dismissBtn);
     popup.appendChild(buttonBox);
@@ -1761,9 +1792,6 @@ async function showPresetPicker({ canDismiss = true } = {}) {
         bg.addEventListener('click', e => { if (e.target === bg) bg.remove(); });
     }
     document.body.appendChild(bg);
-
-    const emptyLink = intro?.querySelector('#start-screen-empty-link');
-    emptyLink?.addEventListener('click', (e) => { e.preventDefault(); bg.remove(); });
 
     // Fetch all preset JSONs in parallel
     const fetched = await Promise.all(BUILTIN_PRESETS.map(async name => {
@@ -2010,7 +2038,7 @@ function setCurrentTrack(name) {
 
 function updatePauseBtn() {
     const btn = document.getElementById('pause-btn');
-    if (btn) btn.textContent = isPlaying ? '⏸' : '▶';
+    if (btn) btn.classList.toggle('is-playing', isPlaying);
 }
 
 function pauseAudio() {
@@ -2492,7 +2520,7 @@ function showTexturePickerPopup(opts) {
     btnBox.className = 'popup-button-box';
     const closeBtn = document.createElement('div');
     closeBtn.className = 'big-Btn';
-    closeBtn.textContent = 'Cancel';
+    closeBtn.textContent = 'Close';
     closeBtn.addEventListener('click', () => bg.remove());
     btnBox.appendChild(closeBtn);
     popup.appendChild(btnBox);
@@ -2648,7 +2676,7 @@ let currentTab = 'oe';
 
 function _updateTabPill() {
     const pill = document.getElementById('editor-switch-pill');
-    const active = document.querySelector('#editorSwitch .switch-tab.selected');
+    const active = document.querySelector('#editorSwitch .tab.selected');
     if (!pill || !active) return;
     pill.style.left  = active.offsetLeft + 'px';
     pill.style.width = active.offsetWidth + 'px';
@@ -2921,7 +2949,6 @@ function renderPPLayerProperties(ppLayer) {
             const range = { min: def.min ?? 0, max: def.max ?? 1 };
             const animBtn = document.createElement('div');
             animBtn.className = 'prop-animate-btn';
-            animBtn.textContent = '●';
             animBtn.title = 'Animate (audio sync)';
             const refresh = () => {
                 const on = _isAnimated(ppLayer.propertyBindings[def.key]);
@@ -2943,7 +2970,6 @@ function renderPPLayerProperties(ppLayer) {
 
             const keyBtn = document.createElement('div');
             keyBtn.className = 'prop-keymap-btn';
-            keyBtn.textContent = '⌨';
             keyBtn.title = 'Animate + map to key / MIDI';
             keyBtn.addEventListener('click', () => {
                 showAnimEditorPopup({
@@ -3000,6 +3026,7 @@ function refreshCounters() {
 
 function renderLayerList() {
     const container = document.getElementById('layer-list');
+    if (!container) return; // host stashed / GL still rebuilding
     container.innerHTML = '';
     // Global is PP-only — accessible from the PP editor's Global pill, not here.
     for (const layer of builder.layers) addLayerElement(layer);
@@ -3198,6 +3225,23 @@ function selectLayer(layer) {
     });
     buttonBox.appendChild(addWave);
 
+    // Text only on non-base layers
+    if (!layer.isBase) {
+        const addText = document.createElement('div');
+        addText.classList.add('Btn');
+        addText.textContent = 'Add Text';
+        addText.addEventListener('click', () => {
+            spawnPopup('Add Text', [
+                ['Name',  'text'],
+                ['Text',  'text'],
+                ['Color', 'color'],
+            ])
+            .then(data => onAddText(layer, data))
+            .catch(() => {});
+        });
+        buttonBox.appendChild(addText);
+    }
+
     if (layer.isBase) {
         const addImage = document.createElement('div');
         addImage.classList.add('Btn');
@@ -3293,8 +3337,14 @@ function renderObjectList(layer) {
             reorderObjectInLayer(layer, payload.objectId, obj.id, above);
         });
 
+        const labelWrap = document.createElement('div');
+        labelWrap.className = 'obj-label-wrap';
+        const icon = document.createElement('div');
+        icon.classList.add('obj-type-icon', `type-${obj.type}`);
         const label = document.createElement('span');
         label.textContent = obj.name;
+        labelWrap.appendChild(icon);
+        labelWrap.appendChild(label);
 
         const dupBtn = document.createElement('div');
         dupBtn.classList.add('duplicate-object', 'image-button');
@@ -3321,7 +3371,7 @@ function renderObjectList(layer) {
         btnGroup.appendChild(dupBtn);
         btnGroup.appendChild(removeBtn);
 
-        row.appendChild(label);
+        row.appendChild(labelWrap);
         row.appendChild(btnGroup);
         listEl.appendChild(row);
     }
@@ -3609,7 +3659,6 @@ function renderObjectProperties(obj, layer) {
         if (ownerKey) {
             const animBtn = document.createElement('div');
             animBtn.className = 'prop-animate-btn';
-            animBtn.textContent = '●';
             animBtn.title = 'Animate (audio sync)';
             const panelObjId = selectedObject.id;
             const refresh = () => {
@@ -3633,7 +3682,6 @@ function renderObjectProperties(obj, layer) {
 
             const keyBtn = document.createElement('div');
             keyBtn.className = 'prop-keymap-btn';
-            keyBtn.textContent = '⌨';
             keyBtn.title = 'Animate + map to key / MIDI';
             keyBtn.addEventListener('click', () => {
                 showAnimEditorPopup({
@@ -4033,6 +4081,221 @@ function renderObjectProperties(obj, layer) {
             v => { obj.spinAxis = v; }
         );
     }
+
+    // ── Text-specific ───────────────────────────
+    if (obj.type === 'text') {
+        section('Text');
+        textInput('Text', () => obj.text, v => { obj.text = v; });
+        selectInput('Align', ['left', 'center', 'right'],
+            () => obj.alignment ?? 'center', v => { obj.alignment = v; });
+
+        section('Geometry');
+        bindingPanel('Size',  obj.size,  { min: 0.05, max: 5 });
+        bindingPanel('Depth', obj.depth, { min: 0,    max: 2 });
+        slider('Curve Segments', 1, 24, 1,
+            () => obj.curveSegments ?? 6,
+            v => { obj.curveSegments = Math.round(v); });
+
+        const bevelRow = row('Bevel');
+        const bevelInp = document.createElement('input');
+        bevelInp.type = 'checkbox'; bevelInp.className = 'prop-checkbox';
+        bevelInp.checked = !!obj.bevelEnabled;
+        bevelInp.addEventListener('change', () => {
+            obj.bevelEnabled = bevelInp.checked;
+            save();
+            renderObjectProperties(obj, layer);
+        });
+        bevelRow.appendChild(bevelInp);
+
+        if (obj.bevelEnabled) {
+            bindingPanel('Bevel Thickness', obj.bevelThickness, { min: 0, max: 0.5 });
+            bindingPanel('Bevel Size',      obj.bevelSize,      { min: 0, max: 0.5 });
+            slider('Bevel Segments', 0, 12, 1,
+                () => obj.bevelSegments ?? 2,
+                v => { obj.bevelSegments = Math.round(v); });
+        }
+
+        //section('Material');
+        //selectInput('Type', ['standard', 'normal', 'wireframe'],
+        //    () => obj.materialType ?? 'standard',
+        //    v => { obj.materialType = v; save(); renderObjectProperties(obj, layer); });
+        //if (obj.materialType !== 'normal') {
+        //    colorInput('Color', () => obj.color, v => { obj.color = v; });
+        //}
+        //if (obj.materialType === 'standard') {
+        //    bindingPanel('Roughness', obj.roughness, { min: 0, max: 1 });
+        //    bindingPanel('Metalness', obj.metalness, { min: 0, max: 1 });
+        //}
+        //bindingPanel('Opacity', obj.opacity, { min: 0, max: 1 });
+
+        section('Material Properties');
+
+        // forward refs — assigned below after their rows are created
+        let opacityRowRef    = null;
+        let roughnessRowRef  = null;
+        let metalnessRowRef  = null;
+        let smoothRowRef     = null;
+        let colorRowRef      = null;
+        let crRowRef         = null;
+        let sensitivityRowRef = null;
+        let fbxMapRowRef     = null;
+        let fbxRoughRowRef   = null;
+        let fbxMetalRowRef   = null;
+        let fbxNormalRowRef  = null;
+
+        const isStandard = () => obj.materialType === 'standard';
+        const isNormal   = () => obj.materialType === 'normal';
+
+        // Centralised visibility sync — all refs may be null when called during init
+        let syncMatVisibility = (type = obj.materialType) => {
+            const std = type === 'standard';
+            const nor = type === 'normal';
+            const hideColor = std && !!obj.colorMap;
+            if (opacityRowRef)    opacityRowRef.style.display    = nor   ? 'none' : '';
+            if (smoothRowRef)     smoothRowRef.style.display     = nor   ? 'none' : '';
+            if (colorRowRef)      colorRowRef.style.display      = hideColor ? 'none' : '';
+            if (crRowRef)         crRowRef.style.display         = hideColor ? 'none' : '';
+            if (sensitivityRowRef) sensitivityRowRef.style.display =
+                (hideColor || !obj.colorReactive) ? 'none' : '';
+            if (fbxMapRowRef)     fbxMapRowRef.style.display     = std   ? '' : 'none';
+            if (fbxRoughRowRef)   fbxRoughRowRef.style.display   = std   ? '' : 'none';
+            if (fbxMetalRowRef)   fbxMetalRowRef.style.display   = std   ? '' : 'none';
+            if (fbxNormalRowRef)  fbxNormalRowRef.style.display  = std   ? '' : 'none';
+            if (roughnessRowRef)  roughnessRowRef.style.display  =
+                std && !obj.roughnessMap ? '' : 'none';
+            if (metalnessRowRef)  metalnessRowRef.style.display  =
+                std && !obj.metalnessMap ? '' : 'none';
+        };
+
+        currentSection.appendChild(createPreviewArea('material', obj.materialType, v => {
+            obj.materialType = v;
+            syncMatVisibility(v);
+            save();
+        }));
+
+        colorRowRef = colorInput('Color', () => obj.color, v => { obj.color = v; });
+
+        // Color reactive toggle + sensitivity (shown only when reactive)
+        const sensitivityRow = document.createElement('div');
+        sensitivityRow.style.display = obj.colorReactive ? '' : 'none';
+        const srWrap = document.createElement('div');
+        srWrap.className = 'prop-row';
+        const srLbl = document.createElement('label');
+        srLbl.className = 'prop-label';
+        srLbl.textContent = 'Color Sensitivity';
+        const srSliderWrap = document.createElement('div');
+        srSliderWrap.className = 'prop-slider-wrap';
+        const srSlider = document.createElement('input');
+        srSlider.type = 'range'; srSlider.className = 'prop-slider';
+        srSlider.min = 0; srSlider.max = 2; srSlider.step = 0.01;
+        srSlider.value = obj.colorSensitivity ?? 0.5;
+        const srNum = document.createElement('input');
+        srNum.type = 'number'; srNum.className = 'prop-number';
+        srNum.min = 0; srNum.max = 2; srNum.step = 0.01;
+        srNum.value = obj.colorSensitivity ?? 0.5;
+        srSlider.addEventListener('input', () => {
+            obj.colorSensitivity = parseFloat(srSlider.value);
+            srNum.value = obj.colorSensitivity; save();
+        });
+        srNum.addEventListener('input', () => {
+            obj.colorSensitivity = parseFloat(srNum.value);
+            srSlider.value = obj.colorSensitivity; save();
+        });
+        srSliderWrap.appendChild(srSlider); srSliderWrap.appendChild(srNum);
+        srWrap.appendChild(srLbl); srWrap.appendChild(srSliderWrap);
+        sensitivityRow.appendChild(srWrap);
+        sensitivityRowRef = sensitivityRow;
+
+        crRowRef = row('Color Reactive');
+        const crInp = document.createElement('input');
+        crInp.type = 'checkbox'; crInp.className = 'prop-checkbox';
+        crInp.checked = obj.colorReactive;
+        crInp.addEventListener('change', () => {
+            obj.colorReactive = crInp.checked;
+            sensitivityRow.style.display = obj.colorReactive ? '' : 'none';
+            save();
+        });
+        crRowRef.appendChild(crInp);
+        (currentSection || panel).appendChild(sensitivityRow);
+
+        // ── Texture slots (standard only) ────────────────────────
+        // Each slot is a button that opens a picker popup. The button text
+        // shows the current texture name (or "None"); disabled when the
+        // catalogue is empty.
+        const mkTextureRow = (label, slotField) => {
+            const r = row(label);
+            const btn = document.createElement('div');
+            btn.className = 'Btn texture-slot-btn';
+            const sync = () => { btn.textContent = obj[slotField] || 'None'; };
+            sync();
+            // Re-label the button when the catalogue gains a new texture (e.g. after
+            // an FBX with embedded textures finishes loading) — also re-sync the
+            // material visibility because the slot value may have been auto-assigned.
+            _textureSlotRefreshers.push(() => { sync(); syncMatVisibility(); });
+            btn.addEventListener('click', () => {
+                showTexturePickerPopup({
+                    current: obj[slotField],
+                    onPick: (name) => {
+                        obj[slotField] = name;
+                        sync();
+                        syncMatVisibility();
+                        save();
+                    },
+                });
+            });
+            r.appendChild(btn);
+            return r;
+        };
+        fbxMapRowRef    = mkTextureRow('Color Texture',     'colorMap');
+        fbxRoughRowRef  = mkTextureRow('Roughness Texture', 'roughnessMap');
+        fbxMetalRowRef  = mkTextureRow('Metalness Texture', 'metalnessMap');
+        fbxNormalRowRef = mkTextureRow('Normal Map',        'normalMap');
+        fbxMapRowRef.style.display    = isStandard() ? '' : 'none';
+        fbxRoughRowRef.style.display  = isStandard() ? '' : 'none';
+        fbxMetalRowRef.style.display  = isStandard() ? '' : 'none';
+        fbxNormalRowRef.style.display = isStandard() ? '' : 'none';
+
+        roughnessRowRef = bindingPanel('Roughness', obj.roughness, { min: 0, max: 1 });
+        roughnessRowRef.style.display = isStandard() && !obj.roughnessMap ? '' : 'none';
+
+        metalnessRowRef = bindingPanel('Metalness', obj.metalness, { min: 0, max: 1 });
+        metalnessRowRef.style.display = isStandard() && !obj.metalnessMap ? '' : 'none';
+
+        smoothRowRef = row('Smooth Shading');
+        const smoothInp = document.createElement('input');
+        smoothInp.type = 'checkbox'; smoothInp.className = 'prop-checkbox';
+        smoothInp.checked = obj.smoothShading ?? true;
+        smoothInp.addEventListener('change', () => { obj.smoothShading = smoothInp.checked; save(); });
+        smoothRowRef.appendChild(smoothInp);
+        smoothRowRef.style.display = isNormal() ? 'none' : '';
+
+        opacityRowRef = bindingPanel('Opacity', obj.opacity, { min: 0, max: 1 });
+        opacityRowRef.style.display = isNormal() ? 'none' : '';
+
+        const wireLineWidthRowRef = slider('Wire Line Width', 1, 20, 0.1,
+            () => obj.wireframeLineWidth ?? 2,
+            v => { obj.wireframeLineWidth = v; }
+        );
+        wireLineWidthRowRef.style.display = obj.materialType === 'wireframe' ? '' : 'none';
+
+        // Hook into the existing visibility sync so it shows/hides with the material type
+        const _origSyncMatVisibility = syncMatVisibility;
+        syncMatVisibility = (type = obj.materialType) => {
+            _origSyncMatVisibility(type);
+            wireLineWidthRowRef.style.display = type === 'wireframe' ? '' : 'none';
+        };
+
+        section('Audio Scale');
+        bindingPanel('Audio Scale', obj.audioScale);
+
+        section('Spin');
+        bindingPanel('Spin Speed', obj.spinSpeed);
+        selectInput('Spin Axis',
+            ['+x', '-x', '+y', '-y', '+z', '-z'],
+            () => obj.spinAxis ?? '+y',
+            v => { obj.spinAxis = v; }
+        );
+    }
 }
 
 // ─────────────────────────────────────────────
@@ -4053,6 +4316,9 @@ async function duplicateObject(obj, layer) {
     } else if (obj.type === 'image') {
         newObj = FillObject.fromJSON(data);
         builder.addImageToLayer(layer.id, newObj);
+    } else if (obj.type === 'text') {
+        newObj = TextObject.fromJSON(data);
+        await builder.addTextToLayer(layer.id, newObj);
     }
     renderObjectList(layer);
     if (newObj) selectObject(newObj, layer);
@@ -4101,6 +4367,17 @@ function onAddWave(layer, data) {
     builder.addWaveToLayer(layer.id, waveObj);
     renderObjectList(layer);
     selectObject(waveObj, layer);
+    saveAllToDB();
+}
+
+async function onAddText(layer, data) {
+    const textObj  = new TextObject();
+    textObj.name   = data['Name'] || 'Text';
+    textObj.text   = data['Text'] || 'Text';
+    if (/^#[0-9a-fA-F]{6}$/.test(data['Color'] || '')) textObj.color = data['Color'];
+    await builder.addTextToLayer(layer.id, textObj);
+    renderObjectList(layer);
+    selectObject(textObj, layer);
     saveAllToDB();
 }
 
@@ -4334,14 +4611,20 @@ window.addEventListener('load', async () => {
         document.getElementById('saved-tracks').appendChild(lI);
     }
 
-    // ── Scene Settings ────────────────────────────────────────
-    const sceneSettingsHeader = document.getElementById('scene-settings-header');
-    const sceneSettingsBody   = document.getElementById('scene-settings-body');
-    sceneSettingsHeader.addEventListener('click', () => {
-        const open = sceneSettingsBody.style.display !== 'none';
-        sceneSettingsBody.style.display = open ? 'none' : '';
-        sceneSettingsHeader.querySelector('.prop-section-arrow').style.transform = open ? 'rotate(-90deg)' : '';
-    });
+    // ── Settings pill: Scene / System ─────────────────────────
+    const _settingsTabs = {
+        scene:  { tab: document.getElementById('settings-tab-scene'),  pane: document.getElementById('settings-scene-pane')  },
+        system: { tab: document.getElementById('settings-tab-system'), pane: document.getElementById('settings-system-pane') },
+    };
+    const _switchSettingsTab = (which) => {
+        for (const [name, { tab, pane }] of Object.entries(_settingsTabs)) {
+            const on = name === which;
+            tab?.classList.toggle('selected', on);
+            if (pane) pane.style.display = on ? '' : 'none';
+        }
+    };
+    _settingsTabs.scene.tab ?.addEventListener('click', () => _switchSettingsTab('scene'));
+    _settingsTabs.system.tab?.addEventListener('click', () => _switchSettingsTab('system'));
     document.getElementById('scene-clear-color').addEventListener('input', e => {
         builder.setClearColor(e.target.value);
         saveAllToDB();

@@ -1,0 +1,86 @@
+#layer-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 5px 10px;
+    margin-top: 4px;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: rgba(255,255,255,0.02);
+}
+
+#layer-list {
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0;
+}
+
+.layer-item > div {
+    display: flex;
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.layer-content {
+    display: flex;
+    width: 100%;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+}
+
+.layer-count {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    color: var(--accent);
+    min-width: 16px;
+    text-align: center;
+    opacity: 0.75;
+    line-height: 1;
+}
+
+.layer-buttons {
+    display: flex;
+    flex-direction: row;
+    gap: 2px;
+}
+
+.layer-opacity-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 1px 4px 4px;
+    width: 100%;
+}
+.layer-opacity-label {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    white-space: nowrap;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+.layer-opacity-slider {
+    flex: 1;
+    accent-color: var(--accent);
+    cursor: pointer;
+    height: 2px;
+}
+
+#current-layer-controls,
+#pp-section {
+    padding: 6px 0;
+    border-top: 1px solid var(--border);
+}
+
+#layerTopButtons {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 8px 2px;
+}

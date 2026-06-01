@@ -1,0 +1,60 @@
+header {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    z-index: 10002;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    height: 32px;
+    background: var(--pannel-bg);
+    backdrop-filter: var(--panel-blur);
+    border-bottom: 1px solid var(--border-bright);
+    font-family: var(--font-mono);
+    color: var(--text);
+}
+
+header .h2 {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    text-shadow: 0 0 14px var(--accent);
+    line-height: 1;
+    width: 100%;
+    text-align: center;
+}
+
+#header-buttons {
+    display: flex;
+    flex-direction: row;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+#file-open, #file-save {
+
+}
+#file-open:hover, #file-save:hover { opacity: 1; }
+
+.header-btn-icon {
+    width: 12px;
+    height: 12px;
+    scale:1.2;
+    flex-shrink: 0;
+    margin-right: 5px;
+    background-color: currentColor;
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: contain;
+    -webkit-mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-size: contain;
+    mask-image: var(--icon-src);
+    -webkit-mask-image: var(--icon-src);
+}
+.header-icon-file    { --icon-src: url('/Graphics/file-svgrepo-com.svg'); }
+.header-icon-windows { --icon-src: url('/Graphics/window-flip-svgrepo-com.svg'); }
+.header-icon-layout  { --icon-src: url('/Graphics/table-layout-svgrepo-com.svg'); }
+.header-icon-help    { --icon-src: url('/Graphics/circle-question-svgrepo-com.svg'); }
+.header-icon-about   { --icon-src: url('/Graphics/file-info-alt-svgrepo-com.svg'); }

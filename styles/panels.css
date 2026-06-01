@@ -1,0 +1,34 @@
+#controlls, #player {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+    height: 100%;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    color: var(--text);
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+#controlls::-webkit-scrollbar, #player::-webkit-scrollbar {
+    width: 0; height: 0; display: none;
+}
+#player { text-align: center; }
+
+#controlls > label {
+    display: flex;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    color: var(--text-dim);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+}
+#controlls > label input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.hide-button { display: none; }

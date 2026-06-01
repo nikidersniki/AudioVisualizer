@@ -171,63 +171,48 @@ export class SceneObject {
 }
 
 // ─────────────────────────────────────────────
-//  ModelObject
+//  MaterialObject  (shared base for Model / Text / Image)
+//  Carries materialType, color, roughness, metalness, opacity,
+//  audioScale, spinSpeed, spinAxis. Provides a single applyBindings
+//  that handles transform + spin axis; subclasses override _scaleK
+//  for unit conversion (Model uses 0.01 because FBX assets are 100x).
 // ─────────────────────────────────────────────
-export class ModelObject extends SceneObject {
-    constructor() {
-        super('model');
-        this.name        = 'Model';
-        this.modelName   = 'duck';
-
-        // Material
-        this.materialType = 'normal';   // 'normal' | 'wireframe' | 'standard'
-        this.color        = '#888888';
-        this.wireframeLineWidth = 2;
+export class MaterialObject extends SceneObject {
+    constructor(type) {
+        super(type);
+        this.materialType = 'standard';   // 'normal' | 'wireframe' | 'standard'
+        this.color        = '#ffffff';
         this.roughness    = new PropertyBinding(1);
         this.metalness    = new PropertyBinding(0);
+        this.opacity      = new PropertyBinding(1);
+        this.wireframeLineWidth = 2;
         // Texture slot assignments — catalogue texture names (null = no map)
         this.colorMap     = null;
         this.roughnessMap = null;
         this.metalnessMap = null;
         this.normalMap    = null;
-
-        // Displacement
-        this.noiseType    = 'simplex'; // 'simplex' | 'perlin' | 'voronoi' | 'sine'
-        this.displaceDirection = 'radial'; // 'radial' | 'normal'
-        this.noiseScale   = new PropertyBinding(1);
-        this.noiseAmount  = new PropertyBinding(1);
-
-        // Audio-reactive scale (overrides base scaleX/Y/Z when in audio mode)
         this.audioScale   = new PropertyBinding(1);
-
-        // Rotation speed (can be audio-driven)
         this.spinSpeed    = new PropertyBinding(0);
-        this.spinAxis     = '+y'; // '+x' | '-x' | '+y' | '-y' | '+z' | '-z'
-
-        this.opacity          = new PropertyBinding(1);
-        this.smoothShading    = true;
-        this.colorReactive   = false;
-        this.colorSensitivity = 0.5;
+        this.spinAxis     = '+y';
+        this._scaleK      = 1;            // per-subclass unit scaler — not serialized
     }
 
     applyBindings(audioData) {
         if (!this.threeObject) return;
         this.threeObject.visible = this.visible;
-
         const s = this.audioScale.resolve(audioData);
         const g = this.globalScale.resolve(audioData);
+        const k = this._scaleK ?? 1;
         this.threeObject.scale.set(
-            this.scaleX.resolve(audioData) * s * g * 0.01,
-            this.scaleY.resolve(audioData) * s * g * 0.01,
-            this.scaleZ.resolve(audioData) * s * g * 0.01
+            this.scaleX.resolve(audioData) * s * g * k,
+            this.scaleY.resolve(audioData) * s * g * k,
+            this.scaleZ.resolve(audioData) * s * g * k
         );
-
         this.threeObject.position.set(
             this.posX.resolve(audioData),
             this.posY.resolve(audioData),
             this.posZ.resolve(audioData)
         );
-
         this.threeObject.rotation.set(
             this.rotX.resolve(audioData),
             this.rotY.resolve(audioData),
@@ -235,12 +220,45 @@ export class ModelObject extends SceneObject {
         );
     }
 
-    toJSON() { return this._bindingsToJSON(); }
+    // _scaleK is a transient runtime constant; drop it from saves.
+    toJSON() {
+        const out = this._bindingsToJSON();
+        delete out._scaleK;
+        return out;
+    }
+}
+
+// ─────────────────────────────────────────────
+//  ModelObject
+// ─────────────────────────────────────────────
+export class ModelObject extends MaterialObject {
+    constructor() {
+        super('model');
+        this.name        = 'Model';
+        this.modelName   = 'duck';
+
+        // Material overrides — Model defaults to normal-mat preview
+        this.materialType = 'normal';
+        this.color        = '#888888';
+
+        // Displacement
+        this.noiseType    = 'simplex'; // 'simplex' | 'perlin' | 'voronoi' | 'sine'
+        this.displaceDirection = 'radial'; // 'radial' | 'normal'
+        this.noiseScale   = new PropertyBinding(1);
+        this.noiseAmount  = new PropertyBinding(1);
+
+        this.smoothShading    = true;
+        this.colorReactive    = false;
+        this.colorSensitivity = 0.5;
+
+        this._scaleK = 0.01; // FBX assets are 100x; bake-in unit conversion
+    }
 
     static fromJSON(d) {
         const obj = new ModelObject();
         obj._restoreBindings(d);
         if (typeof obj.opacity === 'number') obj.opacity = new PropertyBinding(obj.opacity);
+        obj._scaleK = 0.01; // _scaleK isn't serialized — restore it
         return obj;
     }
 }
@@ -317,7 +335,7 @@ export class WaveObject extends SceneObject {
 // ─────────────────────────────────────────────
 //  FillObject  (image plane in scene)
 // ─────────────────────────────────────────────
-export class FillObject extends SceneObject {
+export class FillObject extends MaterialObject {
     constructor() {
         super('image');
         this.name         = 'Image';
@@ -325,41 +343,49 @@ export class FillObject extends SceneObject {
         this.imageName    = null;
         this.videoName    = null;
         this.playbackRate = 1;
-        this.audioScale   = new PropertyBinding(1);
-        this.spinSpeed    = new PropertyBinding(0);
-        this.spinAxis     = '+z';
-        this.opacity      = new PropertyBinding(1);
+        this.spinAxis     = '+z';      // override base default
     }
-
-    applyBindings(audioData) {
-        if (!this.threeObject) return;
-        this.threeObject.visible = this.visible;
-        const s = this.audioScale.resolve(audioData);
-        const g = this.globalScale.resolve(audioData);
-        this.threeObject.scale.set(
-            this.scaleX.resolve(audioData) * s * g,
-            this.scaleY.resolve(audioData) * s * g,
-            this.scaleZ.resolve(audioData) * s * g
-        );
-        this.threeObject.position.set(
-            this.posX.resolve(audioData),
-            this.posY.resolve(audioData),
-            this.posZ.resolve(audioData)
-        );
-        this.threeObject.rotation.set(
-            this.rotX.resolve(audioData),
-            this.rotY.resolve(audioData),
-            this.rotZ.resolve(audioData)
-        );
-    }
-
-    toJSON() { return this._bindingsToJSON(); }
 
     static fromJSON(d) {
         const obj = new FillObject();
         obj._restoreBindings(d);
         if (typeof obj.opacity === 'number') obj.opacity = new PropertyBinding(obj.opacity);
         obj.type = 'image'; // normalize old 'fill' saves
+        return obj;
+    }
+}
+
+// ─────────────────────────────────────────────
+//  TextObject  (3D extruded text via TextGeometry)
+// ─────────────────────────────────────────────
+export class TextObject extends MaterialObject {
+    constructor() {
+        super('text');
+        this.name      = 'Text';
+        this.text      = 'Text';
+        this.fontName  = 'helvetiker';   // catalogue lookup in SceneBuilder
+        this.alignment = 'center';        // 'left' | 'center' | 'right'
+
+        // Animatable geometry params — geo rebuilds when any of these change
+        this.size           = new PropertyBinding(0.5);
+        this.depth          = new PropertyBinding(0.1);
+        this.bevelThickness = new PropertyBinding(0.02);
+        this.bevelSize      = new PropertyBinding(0.01);
+
+        // Integer subdivisions — kept as plain numbers (animating them would
+        // force a full geometry rebuild for every increment).
+        this.curveSegments = 6;
+        this.bevelEnabled  = false;
+        this.bevelSegments = 2;
+    }
+
+    static fromJSON(d) {
+        const obj = new TextObject();
+        obj._restoreBindings(d);
+        // Migrate older saves where these were plain numbers
+        for (const k of ['size', 'depth', 'bevelThickness', 'bevelSize', 'opacity']) {
+            if (typeof obj[k] === 'number') obj[k] = new PropertyBinding(obj[k]);
+        }
         return obj;
     }
 }
@@ -402,6 +428,7 @@ export class Layer {
             if (o.type === 'pointLight')               return PointLightObject.fromJSON(o);
             if (o.type === 'wave')                     return WaveObject.fromJSON(o);
             if (o.type === 'image' || o.type === 'fill') return FillObject.fromJSON(o);
+            if (o.type === 'text')                     return TextObject.fromJSON(o);
             return null;
         }).filter(Boolean);
         return layer;

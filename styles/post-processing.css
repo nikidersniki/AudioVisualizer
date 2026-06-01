@@ -1,0 +1,21 @@
+#pp-top-buttons {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 4px 8px 2px;
+}
+
+#pp-layer-list {
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0;
+}
+
+#pp-layer-properties {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 6px 0 20px;
+    border-top: 1px solid var(--border);
+}

@@ -1,0 +1,121 @@
+/* Animate icon next to mode toggle */
+.prop-animate-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    margin-left: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-lift);
+    color: var(--text-faint);
+    cursor: pointer;
+    font-size: 0;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.prop-animate-btn::before {
+    content: '';
+    width: 11px;
+    height: 11px;
+    background-color: currentColor;
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: contain;
+    -webkit-mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-size: contain;
+    mask-image: url('/Graphics/Animation.svg');
+    -webkit-mask-image: url('/Graphics/Animation.svg');
+}
+.prop-animate-btn:hover {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+.prop-animate-btn.active {
+    background: var(--accent);
+    color: var(--bg);
+    border-color: var(--accent);
+}
+.prop-animate-btn.active:hover { filter: brightness(1.1); }
+
+/* Map-to-key button — mirrors .prop-animate-btn */
+.prop-keymap-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    margin-left: 4px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-lift);
+    color: var(--text-faint);
+    cursor: pointer;
+    font-size: 0;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.prop-keymap-btn::before {
+    content: '';
+    width: 11px;
+    height: 11px;
+    background-color: currentColor;
+    mask-position: center;
+    mask-repeat: no-repeat;
+    mask-size: contain;
+    -webkit-mask-position: center;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-size: contain;
+    mask-image: url('/Graphics/keyboard-svgrepo-com.svg');
+    -webkit-mask-image: url('/Graphics/keyboard-svgrepo-com.svg');
+}
+.prop-keymap-btn:hover {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Key / MIDI override editor inside an animation property block */
+.anim-key-section {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--border);
+}
+.anim-key-head {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-bottom: 4px;
+}
+.anim-key-bind {
+    flex: 1;
+    padding: 3px 6px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-lift);
+    color: var(--text);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+}
+.anim-key-bind:hover { border-color: var(--accent); color: var(--accent); }
+.anim-key-bind.listening {
+    border-color: var(--accent);
+    color: var(--accent);
+    animation: keyBlink 0.8s steps(2, start) infinite;
+}
+@keyframes keyBlink { 50% { opacity: 0.5; } }
+.anim-key-clear {
+    margin-left: 4px;
+    cursor: pointer;
+    color: var(--text-faint);
+    flex-shrink: 0;
+}
+.anim-key-clear:hover { color: var(--accent); }

@@ -1,0 +1,23 @@
+/* Revisualize 3D — Terminal-Noir Industrial
+   Cascade order preserved from the original style.css. */
+
+@import url("./base.css");
+@import url("./header.css");
+@import url("./player.css");
+@import url("./panels.css");
+@import url("./tabs.css");
+@import url("./animate-icon.css");
+@import url("./key-map.css");
+@import url("./animation.css");
+@import url("./audio-monitor.css");
+@import url("./typography.css");
+@import url("./list-buttons.css");
+@import url("./preview-grid.css");
+@import url("./layers.css");
+@import url("./image-buttons.css");
+@import url("./buttons.css");
+@import url("./popup.css");
+@import url("./object-properties.css");
+@import url("./post-processing.css");
+@import url("./mobile.css");
+@import url("./gl.css");

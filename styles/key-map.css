@@ -1,0 +1,80 @@
+#key-map {
+    padding: 8px;
+    overflow-y: auto;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+}
+.keymap-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    color: var(--text-faint);
+}
+.keymap-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 6px;
+}
+/* Bordered box: key area (fills/drains) on top, detail rows below */
+.keymap-cube-wrap {
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    background: var(--bg);
+    overflow: hidden;
+}
+.keymap-cube-wrap.conflict { border-color: #d08020; }
+.keymap-cube {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+    overflow: hidden;
+}
+.keymap-cube-wrap.conflict .keymap-cube { border-bottom-color: #d08020; }
+.keymap-cube-fill {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 0;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent-dim);
+    pointer-events: none;
+}
+.keymap-cube-key {
+    position: relative;
+    z-index: 1;
+    color: var(--text);
+    font-weight: 600;
+    font-size: 0.95rem;
+    text-transform: uppercase;
+    text-align: center;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+.keymap-cube-wrap.conflict .keymap-cube-key { color: #d08020; }
+/* Black copy clipped to the fill level (clip-path set per-frame in JS) */
+.keymap-cube-key.over {
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #000;
+    text-shadow: none;
+    clip-path: inset(100% 0 0 0);
+}
+.keymap-cube-rows { display: flex; flex-direction: column; line-height: 1.25; }
+.keymap-cube-row {
+    padding: 3px 8px;
+    color: var(--text);
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border-bottom: 1px solid var(--border);
+}
+.keymap-cube-row:last-child { color: var(--text-faint); border-bottom: none; }

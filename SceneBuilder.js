@@ -1,7 +1,7 @@
 import {
     Scene, PerspectiveCamera, WebGLRenderer,
     MeshNormalMaterial, MeshBasicMaterial, MeshStandardMaterial,
-    PointLight, DynamicDrawUsage, TextureLoader, VideoTexture,
+    PointLight, DynamicDrawUsage, TextureLoader, VideoTexture, RepeatWrapping,
     EquirectangularReflectionMapping,
     WebGLRenderTarget, OrthographicCamera, Mesh, PlaneGeometry,
     CustomBlending, OneFactor, OneMinusSrcAlphaFactor,
@@ -15,13 +15,15 @@ import { LineMaterial }         from 'three/examples/jsm/lines/LineMaterial.js';
 
 import { FBXLoader }     from 'three/examples/jsm/loaders/FBXLoader.js';
 import { OBJLoader }     from 'three/examples/jsm/loaders/OBJLoader.js';
+import { FontLoader }    from 'three/examples/jsm/loaders/FontLoader.js';
+import { TextGeometry }  from 'three/examples/jsm/geometries/TextGeometry.js';
 import { SimplexNoise }  from 'three/examples/jsm/math/SimplexNoise.js';
 import { ImprovedNoise } from 'three/examples/jsm/math/ImprovedNoise.js';
 import { EXRLoader }     from 'three/examples/jsm/loaders/EXRLoader.js';
 import { mergeVertices }      from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { TransformControls }  from 'three/examples/jsm/controls/TransformControls.js';
 
-import { Layer, ModelObject, PointLightObject, WaveObject, FillObject } from './Sceneobjects.js';
+import { Layer, ModelObject, PointLightObject, WaveObject, FillObject, TextObject } from './Sceneobjects.js';
 // ─────────────────────────────────────────────
 //  Model catalogue  (add entries here to expand)
 // ─────────────────────────────────────────────
@@ -45,6 +47,9 @@ export class PRESETS{
         { name: 'MacNCheese',      path: './models/MacNCheese.fbx',                  scale: [0.01, 0.01, 0.01] },
     ];
     static TEXTURE_CATALOGUE = []; // populated via _registerCustomTexture (from FBX imports)
+    static FONT_CATALOGUE = [
+        { name: 'helvetiker', path: 'https://cdn.jsdelivr.net/npm/three@0.184.0/examples/fonts/helvetiker_regular.typeface.json' },
+    ];
         // ── Shared materials ───────────────────────────
     static materials = {
         normal:    new MeshNormalMaterial(),
@@ -607,23 +612,7 @@ export class SceneBuilder {
         if (!mesh) return;
         const ad = this.audioData;
         fillObj.applyBindings(ad);
-
-        // ── Spin ──────────────────────────────────────
-        const speed = fillObj.spinSpeed?.resolve?.(ad) ?? 0;
-        if (speed !== 0 && typeof time === 'number') {
-            const dir  = fillObj.spinAxis ?? '+z';
-            const sign = dir.charAt(0) === '-' ? -1 : 1;
-            const axis = dir.slice(-1);
-            const delta = (time / 1000) * speed * sign;
-            const rx = fillObj.rotX.resolve(ad);
-            const ry = fillObj.rotY.resolve(ad);
-            const rz = fillObj.rotZ.resolve(ad);
-            mesh.rotation.set(
-                axis === 'x' ? rx + delta : rx,
-                axis === 'y' ? ry + delta : ry,
-                axis === 'z' ? rz + delta : rz
-            );
-        }
+        this._applySpin(fillObj, mesh, ad, time);
 
         const mat     = mesh.material;
         const opacity = fillObj.opacity.resolve(ad);
@@ -682,6 +671,8 @@ export class SceneBuilder {
                     mesh._imageLoadedName = fillObj.imageName;
                     const p = new Promise(resolve => {
                         new TextureLoader().load(entry.path, tex => {
+                            tex.wrapS = RepeatWrapping;
+                            tex.wrapT = RepeatWrapping;
                             mat.map = tex; mat.needsUpdate = true; resolve();
                         }, undefined, resolve);
                     });
@@ -691,6 +682,249 @@ export class SceneBuilder {
                 mat.map = null; mat.needsUpdate = true;
             }
         }
+    }
+
+    // ─────────────────────────────────────────
+    //  Shared material helpers
+    //  (used by Text + Image + any future MaterialObject subclass)
+    // ─────────────────────────────────────────
+    _createMaterialFor(obj) {
+        const opacity = obj.opacity?.value ?? 1;
+        const transparent = opacity < 1;
+        if (obj.materialType === 'normal') {
+            return new MeshNormalMaterial({ transparent, opacity });
+        }
+        if (obj.materialType === 'wireframe') {
+            return new MeshBasicMaterial({
+                wireframe: true,
+                color: obj.color || '#ffffff',
+                transparent, opacity,
+            });
+        }
+        // 'standard' (default)
+        const m = new MeshStandardMaterial({
+            color: obj.color || '#ffffff',
+            roughness: obj.roughness?.value ?? 1,
+            metalness: obj.metalness?.value ?? 0,
+            envMap: PRESETS.materials.standard.envMap ?? null,
+            transparent, opacity,
+        });
+        // Apply any texture-slot assignments up-front so the first frame is correct.
+        m.map          = this._loadCatalogueTexture(obj.colorMap)     ?? null;
+        m.roughnessMap = this._loadCatalogueTexture(obj.roughnessMap) ?? null;
+        m.metalnessMap = this._loadCatalogueTexture(obj.metalnessMap) ?? null;
+        m.normalMap    = this._loadCatalogueTexture(obj.normalMap)    ?? null;
+        if (m.map) m.color.set(0xffffff); // neutral tint so map colours show unaffected
+        return m;
+    }
+
+    _updateMaterialFor(obj, mat, ad) {
+        if (!mat) return;
+        const op = obj.opacity?.resolve?.(ad);
+        if (typeof op === 'number' && mat.opacity !== op) {
+            mat.opacity = op;
+            mat.transparent = op < 1;
+            mat.needsUpdate = true;
+        }
+        if (mat.isMeshStandardMaterial) {
+            // Texture maps — look up catalogue by name (null = no map)
+            const wantMap   = this._loadCatalogueTexture(obj.colorMap)     ?? null;
+            const wantRough = this._loadCatalogueTexture(obj.roughnessMap) ?? null;
+            const wantMetal = this._loadCatalogueTexture(obj.metalnessMap) ?? null;
+            const wantNorm  = this._loadCatalogueTexture(obj.normalMap)    ?? null;
+            if (mat.map          !== wantMap)   { mat.map          = wantMap;   mat.needsUpdate = true; }
+            if (mat.roughnessMap !== wantRough) { mat.roughnessMap = wantRough; mat.needsUpdate = true; }
+            if (mat.metalnessMap !== wantMetal) { mat.metalnessMap = wantMetal; mat.needsUpdate = true; }
+            if (mat.normalMap    !== wantNorm)  { mat.normalMap    = wantNorm;  mat.needsUpdate = true; }
+
+            // Color: when a colorMap is set, neutralise the tint so the map shows
+            // unaffected; otherwise honour obj.color.
+            if (wantMap) {
+                if (mat.color.getHex() !== 0xffffff) mat.color.set(0xffffff);
+            } else if (obj.color) {
+                const want = obj.color.replace('#', '').toLowerCase();
+                if (mat.color.getHexString().toLowerCase() !== want) mat.color.set(obj.color);
+            }
+
+            const r = obj.roughness?.resolve?.(ad);
+            const me = obj.metalness?.resolve?.(ad);
+            if (!wantRough  && typeof r  === 'number' && mat.roughness !== r)  mat.roughness = r;
+            if (!wantMetal  && typeof me === 'number' && mat.metalness !== me) mat.metalness = me;
+
+            // Late HDRI loads update the shared envMap after the material is built;
+            // keep this material in sync so it actually picks up the lighting.
+            const wantEnv = PRESETS.materials.standard.envMap ?? null;
+            if (mat.envMap !== wantEnv) {
+                mat.envMap = wantEnv;
+                mat.needsUpdate = true;
+            }
+        } else if (mat.color && obj.color) {
+            const want = obj.color.replace('#', '').toLowerCase();
+            if (mat.color.getHexString().toLowerCase() !== want) mat.color.set(obj.color);
+        }
+    }
+
+    // Returns true if spin was applied (caller can skip its own rotation set).
+    _applySpin(obj, mesh, ad, time) {
+        const speed = obj.spinSpeed?.resolve?.(ad) ?? 0;
+        if (speed === 0 || typeof time !== 'number') return false;
+        const dir  = obj.spinAxis ?? '+y';
+        const sign = dir.charAt(0) === '-' ? -1 : 1;
+        const axis = dir.slice(-1);
+        const delta = (time / 1000) * speed * sign;
+        const rx = obj.rotX.resolve(ad);
+        const ry = obj.rotY.resolve(ad);
+        const rz = obj.rotZ.resolve(ad);
+        mesh.rotation.set(
+            axis === 'x' ? rx + delta : rx,
+            axis === 'y' ? ry + delta : ry,
+            axis === 'z' ? rz + delta : rz
+        );
+        return true;
+    }
+
+    // ─────────────────────────────────────────
+    //  3D Text management
+    // ─────────────────────────────────────────
+    async _loadFont(name) {
+        this._fontCache ??= new Map();
+        this._fontPromises ??= new Map();
+        if (this._fontCache.has(name)) return this._fontCache.get(name);
+        if (this._fontPromises.has(name)) return this._fontPromises.get(name);
+        const entry = PRESETS.FONT_CATALOGUE.find(e => e.name === name) ?? PRESETS.FONT_CATALOGUE[0];
+        if (!entry) return null;
+        const loader = new FontLoader();
+        const p = new Promise((resolve) => {
+            loader.load(entry.path, (font) => {
+                this._fontCache.set(name, font);
+                resolve(font);
+            }, undefined, () => resolve(null));
+        });
+        this._fontPromises.set(name, p);
+        return p;
+    }
+
+    async addTextToLayer(layerId, textObj) {
+        const layer = this.getLayer(layerId);
+        if (!layer) return;
+        layer.addObject(textObj);
+        const font = await this._loadFont(textObj.fontName);
+        if (!font) return;
+        const three = this._createTextThreeObject(textObj, font);
+        textObj.threeObject = three;
+        this._layerScenes.get(layerId)?.add(three);
+    }
+
+    // Resolve animatable geo bindings to plain numbers for TextGeometry.
+    _resolveTextGeoParams(textObj, ad) {
+        const r = (v, fallback) => (typeof v === 'number' ? v : (v?.resolve?.(ad) ?? fallback));
+        return {
+            size:           Math.max(0.001, r(textObj.size, 0.5)),
+            depth:          Math.max(0,     r(textObj.depth, 0.1)),
+            bevelThickness: Math.max(0,     r(textObj.bevelThickness, 0.02)),
+            bevelSize:      Math.max(0,     r(textObj.bevelSize, 0.01)),
+        };
+    }
+
+    _textGeometryFor(textObj, font, ad = this.audioData) {
+        const p = this._resolveTextGeoParams(textObj, ad);
+        const geo = new TextGeometry(textObj.text || ' ', {
+            font,
+            size:          p.size,
+            depth:         p.depth,
+            curveSegments: Math.max(1, textObj.curveSegments ?? 6),
+            bevelEnabled:  !!textObj.bevelEnabled,
+            bevelThickness: p.bevelThickness,
+            bevelSize:      p.bevelSize,
+            bevelSegments:  Math.max(0, textObj.bevelSegments ?? 2),
+        });
+        // Center geometry by default; user-driven offset via pos/scale bindings.
+        geo.computeBoundingBox();
+        const bb = geo.boundingBox;
+        if (bb) {
+            const w = bb.max.x - bb.min.x;
+            const align = textObj.alignment ?? 'center';
+            let dx = -bb.min.x; // left-align baseline at origin
+            if (align === 'center') dx = -(bb.min.x + w / 2);
+            else if (align === 'right') dx = -bb.max.x;
+            const dy = -(bb.min.y + (bb.max.y - bb.min.y) / 2);
+            geo.translate(dx, dy, 0);
+        }
+        return geo;
+    }
+
+    // Hash of geometry-defining params; geometry rebuilds when this changes.
+    // Resolved floats are rounded to 3 decimals so tiny per-frame binding jitter
+    // doesn't force a full TextGeometry rebuild every frame.
+    _textGeoKey(textObj, ad = this.audioData) {
+        const p = this._resolveTextGeoParams(textObj, ad);
+        const q = (n) => Math.round(n * 1000) / 1000;
+        return [textObj.text, textObj.fontName, textObj.alignment,
+                q(p.size), q(p.depth), q(p.bevelThickness), q(p.bevelSize),
+                textObj.curveSegments, textObj.bevelEnabled, textObj.bevelSegments].join('|');
+    }
+
+    _createTextThreeObject(textObj, font) {
+        const geo  = this._textGeometryFor(textObj, font);
+        const mat  = this._createMaterialFor(textObj);
+        const mesh = new Mesh(geo, mat);
+        mesh._textGeoKey  = this._textGeoKey(textObj);
+        mesh._textMatType = textObj.materialType;
+        return mesh;
+    }
+
+    _updateText(textObj, time) {
+        const mesh = textObj.threeObject;
+        if (!mesh) return;
+        const ad = this.audioData;
+
+        // Rebuild geometry on geo-param change
+        const key = this._textGeoKey(textObj);
+        if (key !== mesh._textGeoKey) {
+            const font = this._fontCache?.get(textObj.fontName);
+            const rebuild = (f) => {
+                if (!f) return;
+                const newGeo = this._textGeometryFor(textObj, f);
+                mesh.geometry?.dispose?.();
+                mesh.geometry = newGeo;
+                mesh._textGeoKey = this._textGeoKey(textObj);
+            };
+            if (font) rebuild(font);
+            else this._loadFont(textObj.fontName).then(rebuild);
+        }
+
+        // Rebuild material on type swap; live update otherwise
+        if (textObj.materialType !== mesh._textMatType) {
+            mesh.material?.dispose?.();
+            mesh.material = this._createMaterialFor(textObj);
+            mesh._textMatType = textObj.materialType;
+        }
+        this._updateMaterialFor(textObj, mesh.material, ad);
+
+        // Wireframe: stock GL_LINES ignores linewidth. Stack a fat-line overlay
+        // on top so wireframeLineWidth actually does something.
+        if (textObj.materialType === 'wireframe') {
+            // Rebuild the overlay's edge map whenever the underlying geometry
+            // rebuilt (animatable size/depth, text content, etc.).
+            const needsRebuild = !mesh._wfOverlay || mesh._wfOverlayGeoKey !== mesh._textGeoKey;
+            if (needsRebuild && mesh._wfOverlay) this._removeWireframeOverlay(mesh);
+            const overlay = this._ensureWireframeOverlay(mesh);
+            if (needsRebuild) mesh._wfOverlayGeoKey = mesh._textGeoKey;
+
+            const lm = overlay.material;
+            lm.color.set(textObj.color || '#ffffff');
+            const opacity = textObj.opacity.resolve(ad);
+            lm.opacity     = opacity;
+            lm.transparent = opacity < 1;
+            lm.linewidth   = textObj.wireframeLineWidth ?? 2;
+            lm.resolution.set(this.renderer.domElement.width, this.renderer.domElement.height);
+        } else if (mesh._wfOverlay) {
+            this._removeWireframeOverlay(mesh);
+            mesh._wfOverlayGeoKey = null;
+        }
+
+        textObj.applyBindings(ad);
+        this._applySpin(textObj, mesh, ad, time);
     }
 
     // ─────────────────────────────────────────
@@ -802,6 +1036,10 @@ export class SceneBuilder {
         const entry = this._findAsset(name);
         if (!entry) return null;
         const tex = new TextureLoader().load(entry.path);
+        // Default to repeat-tiling on both axes so UVs > 1 wrap rather than
+        // stretch the edge pixel. Materials can still override per-instance.
+        tex.wrapS = RepeatWrapping;
+        tex.wrapT = RepeatWrapping;
         this._textureCache.set(name, tex);
         return tex;
     }
@@ -985,7 +1223,8 @@ export class SceneBuilder {
                 if (obj.type === 'model')      this._updateModel(obj, time);
                 if (obj.type === 'pointLight') obj.applyBindings(this.audioData);
                 if (obj.type === 'wave')       this._updateWave(obj);
-                if (obj.type === 'image') this._updateImage(obj, time);
+                if (obj.type === 'image')      this._updateImage(obj, time);
+                if (obj.type === 'text')       this._updateText(obj, time);
             }
         }
         const tObj = dbg ? performance.now() : 0;
@@ -1424,6 +1663,13 @@ export class SceneBuilder {
                     const mat  = new MeshBasicMaterial({ transparent: true });
                     obj.threeObject = new Mesh(new PlaneGeometry(2, 2), mat);
                     scene.add(obj.threeObject);
+                } else if (obj.type === 'text') {
+                    promises.push(this._loadFont(obj.fontName).then((font) => {
+                        if (!font) return;
+                        const three = this._createTextThreeObject(obj, font);
+                        obj.threeObject = three;
+                        scene.add(three);
+                    }));
                 }
             }
         }

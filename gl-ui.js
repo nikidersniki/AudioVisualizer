@@ -26,9 +26,9 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         const canvas    = document.getElementById('three-canvas');
         const dragDrop  = document.getElementById('drag-drop');
         const controlls = document.getElementById('controlls');
-        const projSet   = document.getElementById('project-settings');
         const layers    = document.getElementById('layers');
         const objList   = document.getElementById('object-list');
+        const addBtns   = document.getElementById('layerTopButtons');
         const objEditor = document.getElementById('current-layer-controls');
         const ppSection = document.getElementById('pp-section');
         const animSec   = document.getElementById('anim-section');
@@ -81,10 +81,12 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
             fsBtn.textContent = active ? '⤬' : '⛶';
         });
 
-        // Outliner host: layers + object-list (object-list is plucked out of #current-layer-controls)
+        // Outliner host: layers + add-object buttons + object-list (the latter
+        // two are plucked out of #current-layer-controls).
         const outlinerHost = document.createElement('div');
         outlinerHost.id = 'outliner-host';
         if (layers)  outlinerHost.appendChild(layers);
+        if (addBtns) outlinerHost.appendChild(addBtns);
         if (objList) outlinerHost.appendChild(objList);
 
         // Progress host: now-playing + progress bar container
@@ -93,7 +95,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         if (nowPlay)  progressHost.appendChild(nowPlay);
         if (progress) progressHost.appendChild(progress);
 
-        [viewportHost, outlinerHost, objEditor, ppSection, animSec, audioMon, keyMap, player, progressHost, controlls, projSet]
+        [viewportHost, outlinerHost, objEditor, ppSection, animSec, audioMon, keyMap, player, progressHost, controlls]
             .filter(Boolean).forEach(h => stash.appendChild(h));
 
         // ── Component definitions ─────────────────────────
@@ -107,8 +109,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
             'audio-monitor':   { title: 'Audio Monitor',   hostId: 'audio-monitor' },
             'key-map':         { title: 'Key Map',         hostId: 'key-map' },
             'progress-bar':    { title: 'Player',          hostId: 'progress-host' },
-            'settings':        { title: 'Settings',        hostId: 'controlls' },
-            'project-settings':{ title: 'Project Settings', hostId: 'project-settings' }
+            'settings':        { title: 'Settings',        hostId: 'controlls' }
         };
 
         const glContainer = document.getElementById('gl-container');
@@ -140,7 +141,62 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
             });
         });
 
-        const SAVE_KEY = 'gl-layout-v11';
+        const SAVE_KEY = 'gl-layout-v12';
+
+        // Defensive: drop any component nodes whose componentType is no longer
+        // registered (e.g. removed entries like 'project-settings'). GL v2
+        // throws when asked to instantiate an unknown component, which would
+        // leave the whole page half-initialised.
+        const _validTypes = new Set(Object.keys(COMPONENTS));
+        const _stripUnknownComponents = (node) => {
+            if (!node || typeof node !== 'object') return node;
+            // GL config has a `root` wrapper — recurse into it
+            if (node.root) node.root = _stripUnknownComponents(node.root);
+            if (Array.isArray(node.content)) {
+                node.content = node.content
+                    .map(_stripUnknownComponents)
+                    .filter(child => {
+                        if (!child || typeof child !== 'object') return false;
+                        if (child.type === 'component') {
+                            const t = child.componentType ?? child.componentName;
+                            return !t || _validTypes.has(t);
+                        }
+                        return true;
+                    });
+            }
+            return node;
+        };
+
+        // Filter duplicate component entries from a layout config before load.
+        // Each component type hosts a single shared DOM node, so two instances
+        // would fight over the same host. Keep the first occurrence in tree
+        // order; drop subsequent ones (then collapse empty stacks/rows/cols).
+        const _dedupeComponents = (cfg) => {
+            if (!cfg || typeof cfg !== 'object') return cfg;
+            const seen = new Set();
+            const walk = (node) => {
+                if (!node || typeof node !== 'object') return node;
+                if (Array.isArray(node.content)) {
+                    node.content = node.content
+                        .map(child => {
+                            if (child?.type === 'component') {
+                                const t = child.componentType ?? child.componentName;
+                                if (t && seen.has(t)) return null;
+                                if (t) seen.add(t);
+                                return child;
+                            }
+                            return walk(child);
+                        })
+                        .filter(Boolean)
+                        // drop now-empty stacks/rows/columns
+                        .filter(child => !(['stack', 'row', 'column'].includes(child.type)
+                                           && (!Array.isArray(child.content) || child.content.length === 0)));
+                }
+                return node;
+            };
+            if (cfg.root) cfg.root = walk(cfg.root);
+            return cfg;
+        };
 
         // GL v2 saveLayout returns a ResolvedLayoutConfig (with numeric `size`)
         // while loadLayout always expects an unresolved LayoutConfig (string `size`).
@@ -184,10 +240,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
                                 { type: 'component', componentType: 'post-processing', title: 'Post Processing' },
                                 { type: 'component', componentType: 'animation',       title: 'Animation' }
                             ]},
-                            { type: 'stack', content: [
-                                { type: 'component', componentType: 'settings',         title: 'Settings' },
-                                { type: 'component', componentType: 'project-settings', title: 'Project Settings' }
-                            ]}
+                            { type: 'component', componentType: 'settings', title: 'Settings' }
                         ]
                     }
                 ]
@@ -195,11 +248,46 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         };
 
         const findComponentsByType = (type) => {
-            const all = layout.rootItem?.getItemsByType?.('component') ?? [];
-            return all.filter(i => (i.componentType ?? i.componentName) === type);
+            // GL v2 ContentItem.getItemsByType may not exist on layout.rootItem in
+            // every edge case; fall back to walking the tree.
+            const root = layout.rootItem;
+            if (!root) return [];
+            const out = [];
+            const walk = (n) => {
+                if (!n) return;
+                const t = n.componentType ?? n.componentName;
+                if (n.isComponent && t === type) out.push(n);
+                const kids = n.contentItems ?? n.content ?? [];
+                for (const c of kids) walk(c);
+            };
+            walk(root);
+            return out;
         };
 
-        // Block duplicate components — only one window per type allowed
+        const focusExisting = (item) => {
+            const stack = item?.parentItem;
+            if (stack?.setActiveContentItem) {
+                try { stack.setActiveContentItem(item); } catch {}
+            }
+        };
+
+        // Gate every component-creation path through this check. Wrapping
+        // addComponent covers Windows menu, programmatic adds, and any GL
+        // drag-to-create path that flows through the public API.
+        const _origAddComponent = layout.addComponent?.bind(layout);
+        if (_origAddComponent) {
+            layout.addComponent = function (type, state, title) {
+                const dupes = findComponentsByType(type);
+                if (dupes.length > 0) {
+                    focusExisting(dupes[0]);
+                    return dupes[0];
+                }
+                return _origAddComponent(type, state, title);
+            };
+        }
+
+        // Runtime safety net: if a component slips in through a path the wrap
+        // missed (raw addItem, drag-from-tab-bar), nuke the duplicate.
         let _isLoadingLayout = true;
         const onItemCreated = (event) => {
             const item = event?.target ?? event?.item ?? event;
@@ -209,14 +297,27 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
             queueMicrotask(() => {
                 const dupes = findComponentsByType(type);
                 if (dupes.length <= 1) return;
-                try { item.parentItem?.removeChild?.(item); }
-                catch (e) { try { item.remove?.(); } catch {} }
+                // Keep the first instance, drop the rest
+                const keep = dupes[0];
+                for (let i = 1; i < dupes.length; i++) {
+                    const dup = dupes[i];
+                    try { dup.parentItem?.removeChild?.(dup); }
+                    catch { try { dup.remove?.(); } catch {} }
+                }
+                focusExisting(keep);
                 if (_isLoadingLayout) return;
                 const title = COMPONENTS[type]?.title ?? type;
                 notifyPopup(`Only one "${title}" window can exist.`);
             });
         };
-        layout.addEventListener?.('itemCreated', onItemCreated);
+        // GL v2 LayoutManager extends EventEmitter — addEventListener is an
+        // alias of on(). Register via addEventListener to match the persist
+        // listener loop below (registering on both would double-fire).
+        if (typeof layout.addEventListener === 'function') {
+            layout.addEventListener('itemCreated', onItemCreated);
+        } else if (typeof layout.on === 'function') {
+            layout.on('itemCreated', onItemCreated);
+        }
 
         const saved = localStorage.getItem(SAVE_KEY);
         let toLoad = defaultLayout;
@@ -224,10 +325,10 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
             try { toLoad = JSON.parse(saved); } catch { toLoad = defaultLayout; }
         }
         let _bootRecovered = false;
-        try { layout.loadLayout(_maybeUnresolve(toLoad)); }
+        try { layout.loadLayout(_dedupeComponents(_stripUnknownComponents(_maybeUnresolve(toLoad)))); }
         catch (e) {
             console.warn('saved layout invalid, loading default', e);
-            try { layout.loadLayout(defaultLayout); } catch (e2) { console.error(e2); }
+            try { layout.loadLayout(_dedupeComponents(defaultLayout)); } catch (e2) { console.error(e2); }
             try { localStorage.removeItem(SAVE_KEY); } catch {}
             _bootRecovered = true;
         }
@@ -260,6 +361,43 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         };
         ['stateChanged', 'itemCreated', 'itemDestroyed', 'activeContentItemChanged', 'tabCreated', 'rowCreated', 'columnCreated', 'stackCreated']
             .forEach(ev => layout.addEventListener?.(ev, persistDebounced));
+
+        // Prepend a type-matched icon to each GL tab header
+        const decorateTab = (event) => {
+            const tab = event?.target ?? event?.tab ?? event;
+            if (!tab) return;
+            const el = tab.element ?? tab._element;
+            if (!el) return;
+            const ci = tab.componentItem ?? tab.contentItem;
+            const type = ci?.componentType ?? ci?.componentName;
+            if (!type) return;
+            // Avoid double-insertion on re-decorate
+            if (el.querySelector('.lm_tab_icon')) return;
+            const titleEl = el.querySelector('.lm_title') ?? el;
+            const icon = document.createElement('span');
+            icon.className = `lm_tab_icon menu-icon-${type}`;
+            titleEl.parentNode.insertBefore(icon, titleEl);
+        };
+        if (typeof layout.addEventListener === 'function') {
+            layout.addEventListener('tabCreated', decorateTab);
+        } else if (typeof layout.on === 'function') {
+            layout.on('tabCreated', decorateTab);
+        }
+        // tabCreated only fires going forward; sweep tabs created during the
+        // initial loadLayout (which ran before this listener was attached).
+        const decorateExistingTabs = () => {
+            const visit = (n) => {
+                if (!n) return;
+                const tabs = n.header?.tabs;
+                if (Array.isArray(tabs)) tabs.forEach(decorateTab);
+                const kids = n.contentItems ?? n.content ?? [];
+                for (const c of kids) visit(c);
+            };
+            visit(layout.rootItem);
+        };
+        queueMicrotask(decorateExistingTabs);
+        // Also re-sweep after applyGLLayout etc.
+        window.addEventListener('gl-layout-changed', () => queueMicrotask(decorateExistingTabs));
         window.addEventListener('beforeunload', persist);
         window.addEventListener('pagehide', persist);
 
@@ -368,7 +506,7 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
         window.applyGLLayout = (json) => {
             if (!json) return;
             _isLoadingLayout = true;
-            try { layout.loadLayout(_maybeUnresolve(json)); }
+            try { layout.loadLayout(_dedupeComponents(_stripUnknownComponents(_maybeUnresolve(json)))); }
             catch (e) {
                 console.warn('applyGLLayout failed (incompatible layout, keeping current)', e);
             }
@@ -393,7 +531,10 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
             list.innerHTML = '';
             const reset = document.createElement('div');
             reset.className = 'windows-menu-item';
-            reset.textContent = '   Reset Layout';
+            const resetIcon = document.createElement('span');
+            resetIcon.className = 'windows-menu-icon menu-icon-reset';
+            reset.appendChild(resetIcon);
+            reset.appendChild(document.createTextNode('Reset Layout'));
             reset.addEventListener('click', (ev) => {
                 ev.stopPropagation();
                 list.classList.remove('open');
@@ -449,7 +590,10 @@ import { GoldenLayout, LayoutConfig } from 'https://cdn.jsdelivr.net/npm/golden-
                 const open = findComponents(type).length > 0;
                 const row = document.createElement('div');
                 row.className = 'windows-menu-item' + (open ? ' is-open' : '');
-                row.textContent = (open ? '✓ ' : '   ') + info.title;
+                const icon = document.createElement('span');
+                icon.className = `windows-menu-icon menu-icon-${type}`;
+                row.appendChild(icon);
+                row.appendChild(document.createTextNode((open ? '✓ ' : '') + info.title));
                 row.addEventListener('click', (ev) => {
                     ev.stopPropagation();
                     const existing = findComponents(type)[0];

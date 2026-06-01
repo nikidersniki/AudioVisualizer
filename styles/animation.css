@@ -1,0 +1,137 @@
+#anim-section { padding: 6px 0; }
+#anim-section > .h2 {
+    padding: 4px 12px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-faint);
+}
+#anim-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 8px;
+}
+.anim-object {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 3px 8px;
+    background: var(--accent-glow);
+    border-left: 2px solid var(--accent);
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s;
+}
+.anim-object:hover { background: var(--accent-dim); }
+.anim-object-arrow {
+    display: inline-block;
+    font-size: 0.75rem;
+    opacity: 0.7;
+    transition: transform 0.15s;
+    line-height: 1;
+    order: 2;
+}
+.anim-object.collapsed .anim-object-arrow { transform: rotate(-90deg); }
+.anim-group-body {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 4px 0 4px 6px;
+    margin-left: 4px;
+    border-left: 1px solid var(--border);
+}
+.anim-property-block {
+    display: flex;
+    flex-direction: column;
+    padding: 0px;
+}
+.anim-property-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 2px;
+    padding: 3px 8px;
+    background: var(--accent-glow);
+    border-left: 2px solid var(--accent);
+    font-family: var(--font-mono);
+    font-size: 0.6rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--accent);
+    margin-bottom: 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s;
+}
+.anim-property-head:hover { background: var(--accent-dim); }
+.anim-property-head > span:first-child { flex: 1; }
+.anim-property-arrow {
+    display: inline-block;
+    font-size: 0.75rem;
+    opacity: 0.7;
+    transition: transform 0.15s;
+    line-height: 1;
+}
+.anim-property-head.collapsed .anim-property-arrow { transform: rotate(-90deg); }
+.anim-property-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-left: 6px;
+    margin-left: 2px;
+    border-left: 1px solid var(--border);
+}
+.anim-property-head .anim-property-remove {
+    color: var(--accent);
+    opacity: 0.7;
+}
+.anim-property-head .anim-property-remove:hover {
+    opacity: 1;
+    color: var(--accent);
+}
+.anim-property-remove {
+    cursor: pointer;
+    color: var(--text-faint);
+    padding: 0 4px;
+}
+.anim-property-remove:hover { color: var(--accent); }
+.anim-property-block .prop-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 0;
+}
+.anim-property-block .prop-label {
+    flex-shrink: 0;
+    min-width: 56px;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-faint);
+}
+.anim-empty {
+    padding: 12px;
+    text-align: center;
+    color: var(--text-faint);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-style: italic;
+}
+
+/* Indicate that the constant slider is locked while animating */
+.prop-row.animated .prop-slider-wrap {
+    opacity: 0.45;
+    pointer-events: none;
+}
